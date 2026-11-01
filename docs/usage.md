@@ -24,6 +24,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - `driver` must be `macvlan`; the device is created in bridge mode.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - On start, and before each attach, claims whose netns no longer exists are dropped.
+- On start, host macvlans named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
 
 The daemon calls `/usr/sbin/ip` and `/usr/bin/nsenter`.

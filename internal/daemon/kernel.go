@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"lanatt/internal/claims"
@@ -36,6 +37,44 @@ func DecideRoute(hasDefault, wantDefault bool) RouteAction {
 	default:
 		return RouteAdd
 	}
+}
+
+// TempName is the host-side name a macvlan has until it is moved into the netns.
+func TempName(netns uint64, i int) string {
+	return fmt.Sprintf("lt%08x%d", uint32(netns), i)
+}
+
+var tempName = regexp.MustCompile(`^lt[0-9a-f]{8}[0-9]+$`)
+
+// StaleTemps picks lanatt's temporary devices out of `ip -o link show type macvlan`.
+// On the host, any such device was left by a crash between create and move.
+func StaleTemps(out string) []string {
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		name, _, _ := strings.Cut(strings.TrimSuffix(f[1], ":"), "@")
+		if tempName.MatchString(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// reapTemps deletes temporary macvlans a crashed daemon left on the host.
+func reapTemps() error {
+	out, err := run(nil, ipBin, "-o", "link", "show", "type", "macvlan")
+	if err != nil {
+		return err
+	}
+	for _, name := range StaleTemps(out) {
+		if _, err := run(nil, ipBin, "link", "del", "dev", name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // join creates the macvlan on the host, moves it into the netns, and configures it there.

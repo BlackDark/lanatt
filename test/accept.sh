@@ -91,7 +91,9 @@ hook() {
 join() { printf '[{"network":"lab","address":"%s","mac":"%s"%s}]' "$1" "$2" "${3:-}"; }
 in_ns() { nsenter -t "$1" --net ip "${@:2}"; }
 
+ip link add lt0000abcd0 link "$PARENT" type macvlan mode bridge
 start_daemon
+check "leftover temporary macvlan reaped at start" "! ip link show lt0000abcd0 >/dev/null 2>&1"
 
 # 1. A rootless netns gains the attachment, and a default route via the gateway.
 netns "$U"; A=$NSPID

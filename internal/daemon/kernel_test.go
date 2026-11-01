@@ -18,3 +18,17 @@ func TestDecideRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestStaleTemps(t *testing.T) {
+	out := "7: ltf00003290@latparent: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN\\    link/ether 02:42:0a:fe:01:0a brd ff:ff:ff:ff:ff:ff\n" +
+		"8: shim0@eno1: <BROADCAST,MULTICAST,UP> mtu 1500\n" +
+		"9: ltnothex1@eno1: <BROADCAST> mtu 1500\n" +
+		"10: lt0000000a12: <BROADCAST> mtu 1500\n"
+	got := StaleTemps(out)
+	if len(got) != 2 || got[0] != "ltf00003290" || got[1] != "lt0000000a12" {
+		t.Fatalf("got %v", got)
+	}
+	if name := TempName(0x1f0000329, 3); name != "ltf00003293" || len(StaleTemps("1: "+name+": x")) != 1 {
+		t.Fatalf("TempName %q not recognised", name)
+	}
+}

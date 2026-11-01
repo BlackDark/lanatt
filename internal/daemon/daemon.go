@@ -30,8 +30,11 @@ const (
 	maxConns   = 32
 )
 
-// New loads stored claims and drops those whose netns is gone.
+// New reaps leftover temporary devices, loads stored claims, and drops those whose netns is gone.
 func New(cfg config.Config) (*Server, error) {
+	if err := reapTemps(); err != nil {
+		return nil, fmt.Errorf("reap temporary devices: %w", err)
+	}
 	st, err := claims.Load(cfg.State)
 	if err != nil {
 		return nil, err
@@ -149,7 +152,7 @@ func (s *Server) attach(uid uint32, req wire.Request) error {
 		if p.Existing {
 			continue
 		}
-		tmp := fmt.Sprintf("lt%08x%d", uint32(t.netns), i)
+		tmp := TempName(t.netns, i)
 		if err := join(t.ns, s.cfg.Networks[p.Network], p, tmp); err != nil {
 			return fmt.Errorf("network %q: %w", p.Network, err)
 		}
