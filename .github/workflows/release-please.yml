@@ -23,6 +23,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write # release PR labels
+      actions: write # dispatch CI on the release PR
     outputs:
       created: ${{ steps.rp.outputs.release_created }}
       tag: ${{ steps.rp.outputs.tag_name }}
@@ -32,6 +33,17 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # PR events from GITHUB_TOKEN start no CI, so the required `check` would never report on the
+      # release PR. workflow_dispatch is the one event GITHUB_TOKEN may start.
+      - name: Run CI on the release PR
+        if: steps.rp.outputs.release_created != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: release-please--branches--main
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" >/dev/null 2>&1; then
+            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          fi
 
   publish:
     needs: release-please
