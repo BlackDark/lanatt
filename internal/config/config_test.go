@@ -51,3 +51,27 @@ func TestParseRefuses(t *testing.T) {
 		t.Error("empty allowlist accepted")
 	}
 }
+
+func TestAllowRoot(t *testing.T) {
+	off, err := Parse([]byte(`{"uids":[1000]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.Allowed(0) || !off.Allowed(1000) || off.Allowed(1001) {
+		t.Errorf("without allowRoot: %+v", off.UIDs)
+	}
+	on, err := Parse([]byte(`{"uids":[1000],"allowRoot":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !on.Allowed(0) || !on.Allowed(1000) || on.Allowed(1001) {
+		t.Errorf("with allowRoot: %+v", on)
+	}
+	rootOnly, err := Parse([]byte(`{"allowRoot":true}`))
+	if err != nil || !rootOnly.Allowed(0) {
+		t.Errorf("allowRoot without uids: %v", err)
+	}
+	if _, err := Parse([]byte(`{"uids":[0],"allowRoot":true}`)); err == nil {
+		t.Error("uid 0 in uids accepted")
+	}
+}

@@ -17,8 +17,9 @@ type target struct {
 	netns uint64
 }
 
-// openTarget refuses a pid that the caller does not own or that sits in the daemon's netns.
-func openTarget(uid uint32, pid int) (target, error) {
+// openTarget refuses a pid that sits in the daemon's netns, or that the caller does not own
+// unless anyOwner is set.
+func openTarget(uid uint32, pid int, anyOwner bool) (target, error) {
 	if pid <= 0 {
 		return target{}, errors.New("pid is missing")
 	}
@@ -30,7 +31,7 @@ func openTarget(uid uint32, pid int) (target, error) {
 	if err != nil {
 		return target{}, err
 	}
-	t, err := checkTarget(uid, pid, ns, before)
+	t, err := checkTarget(uid, pid, ns, before, anyOwner)
 	if err != nil {
 		ns.Close()
 		return target{}, err
@@ -38,7 +39,7 @@ func openTarget(uid uint32, pid int) (target, error) {
 	return t, nil
 }
 
-func checkTarget(uid uint32, pid int, ns *os.File, before string) (target, error) {
+func checkTarget(uid uint32, pid int, ns *os.File, before string, anyOwner bool) (target, error) {
 	owner, err := procUID(pid)
 	if err != nil {
 		return target{}, err
@@ -47,7 +48,7 @@ func checkTarget(uid uint32, pid int, ns *os.File, before string) (target, error
 	if after, err := startTime(pid); err != nil || after != before {
 		return target{}, fmt.Errorf("pid %d changed while being checked", pid)
 	}
-	if owner != uid {
+	if !anyOwner && owner != uid {
 		return target{}, fmt.Errorf("pid %d is not owned by uid %d", pid, uid)
 	}
 	id, err := fileNsID(ns)

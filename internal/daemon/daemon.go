@@ -103,7 +103,7 @@ func (s *Server) respond(conn net.Conn) error {
 	if err != nil {
 		return fmt.Errorf("peer credentials: %w", err)
 	}
-	if !s.cfg.UIDs[uid] {
+	if !s.cfg.Allowed(uid) {
 		log.Printf("uid=%d refused: not allowed", uid)
 		return fmt.Errorf("uid %d is not allowed", uid)
 	}
@@ -133,7 +133,8 @@ func (s *Server) handle(uid uint32, req wire.Request) error {
 }
 
 func (s *Server) attach(uid uint32, req wire.Request) error {
-	t, err := openTarget(uid, req.Pid)
+	// Root may already create a macvlan anywhere, so a root caller is not bound to its own pids.
+	t, err := openTarget(uid, req.Pid, uid == 0)
 	if err != nil {
 		return err
 	}

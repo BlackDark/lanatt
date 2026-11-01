@@ -3,7 +3,7 @@
 Set up the host once, as root:
 
 ```sh
-install -D -m 644 examples/config.json /etc/lanatt/config.json   # edit uids, parent, prefix, gateway
+install -D -m 644 examples/config.json /etc/lanatt/config.json   # edit uids, allowRoot, parent, prefix, gateway
 install -D -m 644 examples/podman/containers.conf.d/lanatt.conf /etc/containers/containers.conf.d/lanatt.conf
 install -D -m 644 -t /etc/containers/oci/hooks.d examples/podman/hooks.d/*.json
 # The hook runs on the host: copy the binary out of the image.

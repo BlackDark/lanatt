@@ -27,10 +27,12 @@ type Network struct {
 
 // Config is the validated daemon config.
 type Config struct {
-	Socket   string
-	State    string
-	UIDs     map[uint32]bool
-	Networks map[string]Network
+	Socket string
+	State  string
+	UIDs   map[uint32]bool
+	// AllowRoot lets UID 0 callers, the hooks of rootful containers, join any pid's netns.
+	AllowRoot bool
+	Networks  map[string]Network
 }
 
 type rawNetwork struct {
@@ -42,15 +44,21 @@ type rawNetwork struct {
 }
 
 type rawConfig struct {
-	Socket   string       `json:"socket"`
-	State    string       `json:"state"`
-	UIDs     []uint32     `json:"uids"`
-	Networks []rawNetwork `json:"networks"`
+	Socket    string       `json:"socket"`
+	State     string       `json:"state"`
+	UIDs      []uint32     `json:"uids"`
+	AllowRoot bool         `json:"allowRoot"`
+	Networks  []rawNetwork `json:"networks"`
 }
 
 const defaultState = "/var/lib/lanatt/claims.json"
 
 var ifaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
+
+// Allowed reports whether uid may call the daemon.
+func (c Config) Allowed(uid uint32) bool {
+	return c.UIDs[uid] || (uid == 0 && c.AllowRoot)
+}
 
 // ValidInterfaceName reports whether name is a safe Linux interface name.
 func ValidInterfaceName(name string) bool { return ifaceName.MatchString(name) }
@@ -72,7 +80,7 @@ func Parse(data []byte) (Config, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: %w", err)
 	}
-	cfg := Config{Socket: raw.Socket, State: raw.State, UIDs: map[uint32]bool{}, Networks: map[string]Network{}}
+	cfg := Config{Socket: raw.Socket, State: raw.State, UIDs: map[uint32]bool{}, AllowRoot: raw.AllowRoot, Networks: map[string]Network{}}
 	if cfg.Socket == "" {
 		cfg.Socket = wire.DefaultSocket
 	}
@@ -81,11 +89,11 @@ func Parse(data []byte) (Config, error) {
 	}
 	for _, uid := range raw.UIDs {
 		if uid == 0 {
-			return Config{}, errors.New("config: uid 0 cannot be allowlisted")
+			return Config{}, errors.New(`config: uid 0 cannot be in uids, set "allowRoot": true instead`)
 		}
 		cfg.UIDs[uid] = true
 	}
-	if len(cfg.UIDs) == 0 {
+	if len(cfg.UIDs) == 0 && !cfg.AllowRoot {
 		return Config{}, errors.New("config: uids is empty, so every caller would be refused")
 	}
 	for _, rn := range raw.Networks {
