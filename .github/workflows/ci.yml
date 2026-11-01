@@ -1,10 +1,9 @@
-# CI header for every repo (from BlackDark/agent-presets). Copy to .github/workflows/ci.yml.
+# CI header for every repo (from BlackDark/agent-presets).
 # - Draft PRs don't build: push freely, "Ready for review" starts one run.
 # - A new push to a PR cancels its outdated run; runs on main and tags finish.
 # - workflow_call lets release.yml reuse the same checks.
-# - Several CI files: give each its own concurrency group (e2e-..., ...), or a release calling them all cancels one.
 # - Every job carries the draft `if:`; jobs with `needs:` inherit the skip. A skipped job counts as passed for required checks.
-# - Rulesets require the job `check`. More jobs or areas (frontend + firmware, ansible + pulumi) → ci-paths.yml with a gate job.
+# - Rulesets require the job `check`: a gate over `go` and `image`.
 name: CI
 
 on:
@@ -23,11 +22,46 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
+  go:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3 # tools from mise.toml; Rust comes from rust-toolchain.toml via rustup
+      - uses: jdx/mise-action@v3 # tools from mise.toml
       - run: mise run check
+
+  # The image must build on both targets; native runners, nothing pushed.
+  image:
+    if: ${{ !github.event.pull_request.draft }}
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: lanatt:ci
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
+      - name: Entrypoint runs
+        run: |
+          out=$(docker run --rm lanatt:ci hook 2>&1 || true)
+          grep -q "usage: lanatt hook" <<<"$out"
+
+  check:
+    if: always()
+    needs: [go, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
