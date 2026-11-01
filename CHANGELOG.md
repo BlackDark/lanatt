@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/BlackDark/lanatt/compare/v0.1.0...v0.2.0) (2026-11-01)
+
+
+### Features
+
+* allowRoot lets rootful containers join networks ([b6f60bc](https://github.com/BlackDark/lanatt/commit/b6f60bcca5d0722a2f8d64babeb9f8c1957d8944)), closes [#4](https://github.com/BlackDark/lanatt/issues/4)
+* lanatt-&lt;runtime&gt; picks the OCI runtime it wraps ([91b1f9c](https://github.com/BlackDark/lanatt/commit/91b1f9c78d4b522370121bca60fe7acfc1c8225a)), closes [#2](https://github.com/BlackDark/lanatt/issues/2)
+
+
+### Documentation
+
+* drop the release-as note ([cfa67cf](https://github.com/BlackDark/lanatt/commit/cfa67cf2675d28fa66c9870f8c2ce252b3f0e037))
+
 ## 0.1.0 (2026-11-01)
 
 
