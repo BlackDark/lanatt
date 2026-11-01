@@ -3,6 +3,7 @@
 # runs as a rootful Quadlet. A rootless user then starts nginx three ways:
 #   podman run on .64, a rootless Quadlet on .65, rootless Docker Compose on .66,
 #   and rootless Docker with crun as the target runtime on .69.
+#   With allowRoot, rootful Podman on .67 and rootful Docker on .68.
 # Usage: engines-e2e.sh up IMAGE-TAR EXAMPLES-DIR   then curl .64/.65/.66 from another LAN host
 #        engines-e2e.sh down
 set -euo pipefail
@@ -41,7 +42,8 @@ up() {
   wait_for '[[ -S /run/user/$(uid)/bus ]]'
 
   # Host setup, as in examples/README.md.
-  sed "s/\"uids\": \[1000\]/\"uids\": [$(uid)]/" "$ex/config.json" | install -D -m 644 /dev/stdin /etc/lanatt/config.json
+  sed -e "s/\"uids\": \[1000\]/\"uids\": [$(uid)]/" -e 's/"allowRoot": false/"allowRoot": true/' "$ex/config.json" |
+    install -D -m 644 /dev/stdin /etc/lanatt/config.json
   install -D -m 644 "$ex/podman/containers.conf.d/lanatt.conf" /etc/containers/containers.conf.d/lanatt.conf
   install -D -m 644 -t /etc/containers/oci/hooks.d "$ex"/podman/hooks.d/*.json
   sed "s|^Image=.*|Image=$IMAGE|" "$ex/quadlet/lanatt.container" >/etc/containers/systemd/lanatt.container
@@ -84,10 +86,26 @@ up() {
     echo "--- web-crun was NOT created by crun: $(ls "$state")"; exit 1; fi
   show "$(as_user docker inspect -f '{{.State.Pid}}' web-crun)" "rootless docker, lanatt-crun"
 
+  # 5. Rootful Podman, same hook files.
+  podman run -d --name web-rootful --network none \
+    --annotation 'io.lanatt.attachments=[{"network":"lan","address":"10.0.1.67","mac":"02:42:0a:00:01:43"}]' \
+    "$NGINX" >/dev/null
+  show "$(podman inspect -f '{{.State.Pid}}' web-rootful)" "rootful podman"
+
+  # 6. Rootful Docker with lanatt-runc.
+  install -D -m 644 "$ex/docker/daemon.json" /etc/docker/daemon.json
+  systemctl restart docker
+  docker run -d --name web-rootful --runtime lanatt --network none \
+    --annotation 'io.lanatt.attachments=[{"network":"lan","address":"10.0.1.68","mac":"02:42:0a:00:01:44"}]' \
+    "$NGINX" >/dev/null
+  show "$(docker inspect -f '{{.State.Pid}}' web-rootful)" "rootful docker"
+
   echo "--- claims"; cat /var/lib/lanatt/claims.json
 }
 
 down() {
+  docker rm -f web-rootful >/dev/null 2>&1 || true
+  podman rm -f -t 2 web-rootful >/dev/null 2>&1 || true
   if id "$U" >/dev/null 2>&1; then
     as_user docker rm -f web-crun >/dev/null 2>&1 || true
     as_user docker compose -p lanatt down -t 2 >/dev/null 2>&1 || true
@@ -106,8 +124,9 @@ down() {
     userdel -r "$U" 2>/dev/null || true
   fi
   systemctl stop lanatt 2>/dev/null || true
-  rm -f /etc/containers/systemd/lanatt.container
+  rm -f /etc/containers/systemd/lanatt.container /etc/docker/daemon.json
   systemctl daemon-reload
+  systemctl restart docker 2>/dev/null || true
   podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
   rm -rf /etc/lanatt /run/lanatt /var/lib/lanatt /etc/containers/oci /etc/containers/containers.conf.d \
     /usr/local/bin/lanatt /usr/local/bin/lanatt-runc /usr/local/bin/lanatt-crun "$DBIN"
