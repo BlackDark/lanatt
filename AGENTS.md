@@ -4,7 +4,21 @@ Root daemon that gives a rootless workload its own presence on a LAN. Domain wor
 
 ## Verify
 
-Not wired yet. Once `mise.toml` exists, `mise run check` is green before every commit.
+`mise run check` green before every commit.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown under `.scratch/`. No git remote yet. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical role names, stored as a `Status:` line. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Stack
 

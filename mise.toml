@@ -1,0 +1,15 @@
+# Repo-local tools. Rust is not here: this repo has no Rust.
+[tools]
+go = "1.27.3"
+
+[tasks.check]
+description = "Everything CI checks"
+run = """
+set -eu
+test -z "$(gofmt -l .)"
+pkgs=$(go list ./...)
+if [ -n "$pkgs" ]; then
+  go vet ./...
+  go test ./...
+fi
+"""

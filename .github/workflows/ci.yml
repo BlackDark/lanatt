@@ -1,0 +1,33 @@
+# CI header for every repo (from BlackDark/agent-presets). Copy to .github/workflows/ci.yml.
+# - Draft PRs don't build: push freely, "Ready for review" starts one run.
+# - A new push to a PR cancels its outdated run; runs on main and tags finish.
+# - workflow_call lets release.yml reuse the same checks.
+# - Several CI files: give each its own concurrency group (e2e-..., ...), or a release calling them all cancels one.
+# - Every job carries the draft `if:`; jobs with `needs:` inherit the skip. A skipped job counts as passed for required checks.
+# - Rulesets require the job `check`. More jobs or areas (frontend + firmware, ansible + pulumi) → ci-paths.yml with a gate job.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3 # tools from mise.toml; Rust comes from rust-toolchain.toml via rustup
+      - run: mise run check
