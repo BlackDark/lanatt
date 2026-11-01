@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "/usr/local/bin/lanatt",
+    "args": ["lanatt", "hook", "create", "-socket", "/run/lanatt/lanatt.sock"]
+  },
+  "when": {"annotations": {"^io\\.lanatt\\.attachments$": ".*"}},
+  "stages": ["createRuntime"]
+}

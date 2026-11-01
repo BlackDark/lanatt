@@ -1,0 +1,21 @@
+# /etc/containers/systemd/lanatt.container (rootful): the lanatt daemon.
+[Unit]
+Description=lanatt: LAN attachments for rootless workloads
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=ghcr.io/blackdark/lanatt:latest
+ContainerName=lanatt
+Network=host
+PodmanArgs=--pid=host --privileged
+Volume=/etc/lanatt:/etc/lanatt:ro
+Volume=/run/lanatt:/run/lanatt
+Volume=/var/lib/lanatt:/var/lib/lanatt
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p /run/lanatt /var/lib/lanatt
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

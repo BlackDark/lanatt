@@ -1,0 +1,13 @@
+# ~/.config/containers/systemd/web.container (rootless, an allowlisted user): nginx on its own LAN address.
+# Single quotes keep the JSON's double quotes through Quadlet's unquoting.
+[Unit]
+Description=nginx on 10.0.1.65 through lanatt
+
+[Container]
+Image=docker.io/library/nginx:1.29-alpine
+ContainerName=web
+Network=none
+Annotation='io.lanatt.attachments=[{"network":"lan","address":"10.0.1.65","mac":"02:42:0a:00:01:41"}]'
+
+[Install]
+WantedBy=default.target

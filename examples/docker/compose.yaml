@@ -1,0 +1,8 @@
+# Rootless Docker, as an allowlisted user: nginx on its own LAN address.
+services:
+  web:
+    image: docker.io/library/nginx:1.29-alpine
+    runtime: lanatt
+    network_mode: none
+    annotations:
+      io.lanatt.attachments: '[{"network":"lan","address":"10.0.1.66","mac":"02:42:0a:00:01:42"}]'

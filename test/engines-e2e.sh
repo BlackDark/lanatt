@@ -1,85 +1,102 @@
 #!/bin/bash
-# Podman end-to-end on a test VM, as root: the lanatt image runs the daemon (rootful),
-# a rootless user starts nginx with the annotation, and nginx answers on its own LAN address.
-# Usage: podman-e2e.sh up IMAGE-TAR ADDRESS   then curl http://ADDRESS from another LAN host
-#        podman-e2e.sh down
+# Engine end-to-end on a test VM, as root. It installs examples/ as documented. The daemon
+# runs as a rootful Quadlet. A rootless user then starts nginx three ways:
+#   podman run on .64, a rootless Quadlet on .65, rootless Docker Compose on .66.
+# Usage: engines-e2e.sh up IMAGE-TAR EXAMPLES-DIR   then curl .64/.65/.66 from another LAN host
+#        engines-e2e.sh down
 set -euo pipefail
 
 U=lanattdemo
-PARENT=${PARENT:-eth0}
-PREFIX=${PREFIX:-10.0.1.0/24}
-GATEWAY=${GATEWAY:-10.0.1.1}
-MAC=${MAC:-02:42:0a:00:01:40}
 IMAGE=localhost/lanatt:dev
 NGINX=docker.io/library/nginx:1.29-alpine
-# Rootless Podman 5.4 reads only this directory unless containers.conf sets hooks_dir.
-HOOKS=/usr/share/containers/oci/hooks.d
 SOCK=/run/lanatt/lanatt.sock
+DBIN=/usr/local/lib/lanatt-e2e
 
-as_user() { (cd /tmp && runuser -u "$U" -- env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" "$@"); }
+uid() { id -u "$U"; }
+as_user() {
+  (cd /tmp && runuser -u "$U" -- env XDG_RUNTIME_DIR="/run/user/$(uid)" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(uid)/bus" \
+    DOCKER_HOST="unix:///run/user/$(uid)/docker.sock" PATH="$DBIN:/usr/local/bin:/usr/bin:/usr/sbin:/bin" "$@")
+}
+wait_for() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.2; done; echo "timeout: $1" >&2; return 1; }
+show() {
+  local pid=$1
+  echo "--- $2 (pid $pid, user $(ps -o user= -p "$pid"))"
+  nsenter -t "$pid" --net ip -4 -br addr show lan0
+  nsenter -t "$pid" --net ip route show default
+}
 
 up() {
-  local tar=$1 addr=$2
+  local tar=$1 ex=$2
   podman load -q -i "$tar"
-  # The hook runs on the host, so the same binary is copied out of the image.
   cid=$(podman create "$IMAGE")
   podman cp "$cid:/usr/local/bin/lanatt" /usr/local/bin/lanatt
   podman rm -f "$cid" >/dev/null
+  ln -sf lanatt /usr/local/bin/lanatt-runc
 
   id "$U" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$U"
   loginctl enable-linger "$U"
-  for _ in $(seq 50); do [[ -d /run/user/$(id -u "$U") ]] && break; sleep 0.1; done
+  wait_for '[[ -S /run/user/$(uid)/bus ]]'
 
-  mkdir -p /etc/lanatt /run/lanatt /var/lib/lanatt "$HOOKS"
-  cat >/etc/lanatt/config.json <<EOF
-{"socket":"$SOCK","state":"/var/lib/lanatt/claims.json","uids":[$(id -u "$U")],
- "networks":[{"name":"lan","parent":"$PARENT","prefix":"$PREFIX","gateway":"$GATEWAY","driver":"macvlan"}]}
-EOF
-  for stage in create stop; do
-    oci=createRuntime
-    [[ $stage == stop ]] && oci=poststop
-    cat >"$HOOKS/lanatt-$stage.json" <<EOF
-{"version":"1.0.0",
- "hook":{"path":"/usr/local/bin/lanatt","args":["lanatt","hook","$stage","-socket","$SOCK"]},
- "when":{"annotations":{"^io\\\\.lanatt\\\\.attachments\$":".*"}},
- "stages":["$oci"]}
-EOF
-  done
+  # Host setup, as in examples/README.md.
+  sed "s/\"uids\": \[1000\]/\"uids\": [$(uid)]/" "$ex/config.json" | install -D -m 644 /dev/stdin /etc/lanatt/config.json
+  install -D -m 644 "$ex/podman/containers.conf.d/lanatt.conf" /etc/containers/containers.conf.d/lanatt.conf
+  install -D -m 644 -t /etc/containers/oci/hooks.d "$ex"/podman/hooks.d/*.json
+  sed "s|^Image=.*|Image=$IMAGE|" "$ex/quadlet/lanatt.container" >/etc/containers/systemd/lanatt.container
+  systemctl daemon-reload
+  systemctl start lanatt
+  wait_for "[[ -S $SOCK ]]"
 
-  podman rm -f lanatt >/dev/null 2>&1 || true
-  podman run -d --name lanatt --network host --pid host --privileged \
-    -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
-    "$IMAGE" >/dev/null
-  for _ in $(seq 50); do [[ -S $SOCK ]] && break; sleep 0.1; done
-
-  as_user podman rm -f web >/dev/null 2>&1 || true
+  # 1. Plain rootless Podman.
   as_user podman run -d --name web --network none \
-    --annotation "io.lanatt.attachments=[{\"network\":\"lan\",\"address\":\"$addr\",\"mac\":\"$MAC\"}]" \
+    --annotation 'io.lanatt.attachments=[{"network":"lan","address":"10.0.1.64","mac":"02:42:0a:00:01:40"}]' \
     "$NGINX" >/dev/null
-  pid=$(as_user podman inspect -f '{{.State.Pid}}' web)
-  echo "nginx (rootless, uid $(id -u "$U"), pid $pid) netns:"
-  nsenter -t "$pid" --net ip -br addr
-  nsenter -t "$pid" --net ip route
-  echo "claims:"; cat /var/lib/lanatt/claims.json
+  show "$(as_user podman inspect -f '{{.State.Pid}}' web)" "podman run"
+
+  # 2. Rootless Quadlet.
+  as_user install -D -m 644 "$ex/quadlet/web.container" "/home/$U/.config/containers/systemd/web-quadlet.container"
+  sed -i 's/^ContainerName=web$/ContainerName=web-quadlet/' "/home/$U/.config/containers/systemd/web-quadlet.container"
+  as_user systemctl --user daemon-reload
+  as_user systemctl --user start web-quadlet
+  show "$(as_user podman inspect -f '{{.State.Pid}}' web-quadlet)" "rootless quadlet"
+
+  # 3. Rootless Docker with the lanatt-runc runtime.
+  # The setup tool wants dockerd-rootless.sh, docker and dockerd in one directory.
+  install -D -m 755 /usr/share/docker.io/contrib/dockerd-rootless.sh "$DBIN/dockerd-rootless.sh"
+  ln -sf /usr/bin/docker "$DBIN/docker"
+  ln -sf /usr/sbin/dockerd "$DBIN/dockerd"
+  as_user install -D -m 644 "$ex/docker/daemon.json" "/home/$U/.config/docker/daemon.json"
+  as_user bash /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh install --skip-iptables >/dev/null 2>&1
+  wait_for 'as_user docker info >/dev/null 2>&1'
+  as_user docker compose -f "$ex/docker/compose.yaml" -p lanatt up -d --quiet-pull 2>/dev/null
+  show "$(as_user docker inspect -f '{{.State.Pid}}' lanatt-web-1)" "rootless docker compose"
+
+  echo "--- claims"; cat /var/lib/lanatt/claims.json
 }
 
 down() {
   if id "$U" >/dev/null 2>&1; then
+    as_user docker compose -p lanatt down -t 2 >/dev/null 2>&1 || true
+    as_user systemctl --user stop web-quadlet 2>/dev/null || true
     as_user podman rm -f -t 2 web >/dev/null 2>&1 || true
-    echo "claims after stop:"; cat /var/lib/lanatt/claims.json 2>/dev/null || true
+    echo "--- claims after stop"; cat /var/lib/lanatt/claims.json 2>/dev/null || true
+    as_user bash /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh uninstall --skip-iptables >/dev/null 2>&1 2>&1 || true
     loginctl disable-linger "$U" || true
     loginctl terminate-user "$U" 2>/dev/null || true
     pkill -u "$U" 2>/dev/null || true
     sleep 2
     userdel -r "$U" 2>/dev/null || true
   fi
-  podman rm -f lanatt >/dev/null 2>&1 || true
+  systemctl stop lanatt 2>/dev/null || true
+  rm -f /etc/containers/systemd/lanatt.container
+  systemctl daemon-reload
   podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
-  rm -rf /etc/lanatt /run/lanatt /var/lib/lanatt "$HOOKS/lanatt-create.json" "$HOOKS/lanatt-stop.json" /usr/local/bin/lanatt
+  rm -rf /etc/lanatt /run/lanatt /var/lib/lanatt /etc/containers/oci /etc/containers/containers.conf.d \
+    /usr/local/bin/lanatt /usr/local/bin/lanatt-runc "$DBIN"
 }
 
 case ${1:-} in
-  up) up "${2:?image tar}" "${3:?address}" ;;
+  up) up "${2:?image tar}" "${3:?examples dir}" ;;
   down) down ;;
-  *) echo "usage: $0 up IMAGE-TAR ADDRESS | down" >&2; exit 2 ;;
+  *) echo "usage: $0 up IMAGE-TAR EXAMPLES-DIR | down" >&2; exit 2 ;;
 esac
