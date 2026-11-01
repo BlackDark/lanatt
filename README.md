@@ -26,9 +26,13 @@ podman run -d --name lanatt --network host --pid host --privileged \
   ghcr.io/blackdark/lanatt:latest
 ```
 
-Then write `/etc/lanatt/config.json`, install the hook, and annotate a container. See [docs/usage.md](docs/usage.md).
+Then write `/etc/lanatt/config.json`, install the hook, and annotate a container. Podman, Quadlet, Docker and Compose files are in [examples/](examples/README.md). The reference is [docs/usage.md](docs/usage.md).
 
 ## FAQ
+
+### Does it work with rootless Docker?
+
+Yes. Register `lanatt-runc` as a Docker runtime and run the container with `--runtime lanatt`. See [examples/](examples/README.md#docker).
 
 ### Can a rootless Podman container get its own LAN IP with macvlan?
 

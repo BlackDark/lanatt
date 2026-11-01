@@ -10,7 +10,7 @@ lanatt daemon -config /etc/lanatt/config.json
 
 ```json
 {
-  "socket": "/run/lanatt.sock",
+  "socket": "/run/lanatt/lanatt.sock",
   "state": "/var/lib/lanatt/claims.json",
   "uids": [1000],
   "networks": [
@@ -33,8 +33,8 @@ The daemon calls `/usr/sbin/ip` and `/usr/bin/nsenter`.
 
 Register as OCI hooks:
 
-- `createRuntime`: `lanatt hook create [-socket /run/lanatt.sock]`
-- `poststop`: `lanatt hook stop [-socket /run/lanatt.sock]`
+- `createRuntime`: `lanatt hook create [-socket /run/lanatt/lanatt.sock]`
+- `poststop`: `lanatt hook stop [-socket /run/lanatt/lanatt.sock]`
 
 The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments` from the bundle's `config.json`. No annotation: exit 0, the daemon is not contacted. A refusal exits 1, so the engine does not start the workload.
 
@@ -56,29 +56,19 @@ The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR by `rele
 ```sh
 podman run -d --name lanatt --network host --pid host --privileged \
   -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
-  ghcr.io/<owner>/lanatt:<version>
+  ghcr.io/blackdark/lanatt:<version>
 ```
 
 Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on the host through the `/run/lanatt` mount. The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
 
-## Podman hooks
+## Engines
 
-Rootless Podman 5.4 reads hooks only from `/usr/share/containers/oci/hooks.d`, unless `hooks_dir` is set in `containers.conf`. `/usr/share/containers/oci/hooks.d/lanatt-create.json`:
+The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
 
-```json
-{"version": "1.0.0",
- "hook": {"path": "/usr/local/bin/lanatt", "args": ["lanatt", "hook", "create", "-socket", "/run/lanatt/lanatt.sock"]},
- "when": {"annotations": {"^io\\.lanatt\\.attachments$": ".*"}},
- "stages": ["createRuntime"]}
-```
+- **Podman** finds hooks through `hooks_dir`. Its built-in default is only `/usr/share/containers/oci/hooks.d`, which belongs to packages. lanatt's hooks go in `/etc/containers/oci/hooks.d`, which a `containers.conf.d` drop-in adds. Rootful and rootless Podman both read it.
+- **Docker** has no hook directory. `lanatt-runc`, a symlink to `lanatt`, is registered as a Docker runtime. On `create` it adds the lanatt hooks to an annotated bundle, then runs `runc`. Unannotated bundles pass through unchanged. It finds `runc` on `PATH`.
 
-`lanatt-stop.json` is the same, with `stop` and `"stages": ["poststop"]`. Then, as the allowlisted user:
-
-```sh
-podman run -d --network none \
-  --annotation 'io.lanatt.attachments=[{"network":"lan","address":"10.0.1.64","mac":"02:42:0a:00:01:40"}]' \
-  docker.io/library/nginx:1.29-alpine
-```
+Ready-to-install files for Podman, Quadlet, Docker and Compose are in [`examples/`](../examples/README.md).
 
 The host cannot reach its own macvlan attachments. Test from another LAN host.
 
@@ -92,12 +82,12 @@ scp /tmp/lanatt test/accept.sh root@:/tmp/
 ssh root@ bash /tmp/accept.sh /tmp/lanatt
 ```
 
-Podman end to end. This uses the real LAN, so use only an address you have been given:
+Engines end to end. This uses the real LAN, so use only the addresses you have been given (`10.0.1.64`–`66`). It installs `examples/` on the VM, starts the daemon as a rootful Quadlet, and starts nginx three ways as a rootless user: `podman run` on `.64`, a Quadlet on `.65`, and Docker Compose on `.66`. It needs `podman`, `docker.io`, `docker-compose`, `rootlesskit`, `slirp4netns`, `uidmap` and `dbus-user-session`.
 
 ```sh
 docker buildx build --platform linux/amd64 -o type=docker,dest=/tmp/lanatt.tar -t localhost/lanatt:dev .
-scp /tmp/lanatt.tar test/podman-e2e.sh root@:/tmp/
-ssh root@ bash /tmp/podman-e2e.sh up /tmp/lanatt.tar 10.0.1.64
-curl http://10.0.1.64/
-ssh root@ bash /tmp/podman-e2e.sh down
+scp /tmp/lanatt.tar test/engines-e2e.sh root@:/tmp/ && scp -r examples root@:/tmp/lanatt-ex
+ssh root@ bash /tmp/engines-e2e.sh up /tmp/lanatt.tar /tmp/lanatt-ex
+for a in 64 65 66; do curl -s http://10.0.1.$a/ | grep title; done
+ssh root@ bash /tmp/engines-e2e.sh down
 ```

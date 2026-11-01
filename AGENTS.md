@@ -32,14 +32,16 @@ Deviations:
 
 - `cmd/lanatt`: one binary, `daemon` (root) and `hook create|stop` (caller UID).
 - `internal/claims`: the attachment rules, pure. `internal/daemon`: socket, peer credentials, `ip`/`nsenter`.
-- `test/accept.sh`: kernel acceptance on a dummy parent. `test/podman-e2e.sh`: rootless Podman on the real LAN.
+- `test/accept.sh`: kernel acceptance on a dummy parent. `test/engines-e2e.sh`: rootless Podman, Quadlet and Docker on the real LAN, using `examples/`.
+- `internal/runtime`: `lanatt-runc`, the Docker runtime wrapper that adds the hooks.
 
 ## Gotchas
 
 - `go test` cannot create macvlans. Kernel behaviour is proven only as root on `ssh root@` (Debian 13, amd64, no Go). Build on the workstation and copy the binary or image over.
 - On the test VM, `eth0` and `10.0.1.0/24` are the real LAN. Use only `10.0.1.64`–`10.0.1.69` there. Everything else uses the dummy parent and `10.254.1.0/28`.
 - The host cannot reach its own macvlan attachments. Test reachability from the workstation.
-- Rootless Podman reads hooks only from `/usr/share/containers/oci/hooks.d`.
+- Podman's default `hooks_dir` is only `/usr/share/containers/oci/hooks.d`. A hook in `/etc/containers/oci/hooks.d` is ignored until the `examples/podman/containers.conf.d` drop-in is installed.
+- The real LAN addresses on the VM: `.64` `podman run`, `.65` Quadlet, `.66` Docker. `.67`–`.69` are free.
 
 ## Every change
 
