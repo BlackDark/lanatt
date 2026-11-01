@@ -67,3 +67,38 @@ func TestInjectHooksBadConfig(t *testing.T) {
 		t.Error("bad JSON accepted")
 	}
 }
+
+func TestTarget(t *testing.T) {
+	cases := []struct {
+		argv0, env, want string
+		ok               bool
+	}{
+		{"/usr/local/bin/lanatt-runc", "", "runc", true},
+		{"lanatt-crun", "", "crun", true},
+		{"/usr/local/bin/lanatt-runc", "crun", "crun", true},
+		{"lanatt-runc", "/opt/bin/youki", "/opt/bin/youki", true},
+		{"lanatt-runc", "bin/crun", "", false},
+		{"lanatt-", "", "", false},
+		{"lanatt-lanatt-runc", "", "", false},
+		{"lanatt-runc", "lanatt", "", false},
+	}
+	for _, c := range cases {
+		got, err := Target(c.argv0, c.env)
+		if (err == nil) != c.ok || got != c.want {
+			t.Errorf("Target(%q,%q)=%q,%v want %q ok=%v", c.argv0, c.env, got, err, c.want, c.ok)
+		}
+	}
+}
+
+func TestIsWrapper(t *testing.T) {
+	for argv0, want := range map[string]bool{
+		"/usr/local/bin/lanatt-runc": true,
+		"lanatt-crun":                true,
+		"/usr/local/bin/lanatt":      false,
+		"lanatt-":                    false,
+	} {
+		if got := IsWrapper(argv0); got != want {
+			t.Errorf("IsWrapper(%q)=%v", argv0, got)
+		}
+	}
+}

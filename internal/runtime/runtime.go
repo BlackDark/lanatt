@@ -1,4 +1,4 @@
-// Package runtime wraps runc for engines without OCI hook directories, such as Docker.
+// Package runtime wraps an OCI runtime for engines without hook directories, such as Docker.
 // On `create`, it adds the lanatt hooks to the bundle when the annotation is present.
 package runtime
 
@@ -6,9 +6,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"lanatt/internal/wire"
 )
+
+// Target picks the OCI runtime the wrapper becomes. LANATT_RUNTIME wins; otherwise the
+// name after `lanatt-` in the command name: lanatt-runc runs runc, lanatt-crun runs crun.
+// Docker cannot set a runtime's environment, so per-runtime symlinks are the Docker way.
+func Target(argv0, env string) (string, error) {
+	t := env
+	if t == "" {
+		t = strings.TrimPrefix(filepath.Base(argv0), "lanatt-")
+	}
+	switch {
+	case t == "" || t == "lanatt" || strings.HasPrefix(t, "lanatt-"):
+		return "", fmt.Errorf("no target runtime in %q", argv0)
+	case filepath.IsAbs(t):
+		return t, nil
+	case strings.ContainsRune(t, '/'):
+		return "", fmt.Errorf("runtime %q must be a bare name or an absolute path", t)
+	default:
+		return t, nil
+	}
+}
+
+// IsWrapper reports whether the command was started as a lanatt-<runtime> symlink.
+func IsWrapper(argv0 string) bool {
+	base := filepath.Base(argv0)
+	return strings.HasPrefix(base, "lanatt-") && len(base) > len("lanatt-")
+}
 
 // Bundle returns the bundle directory of a runc `create` call, or "" for any other call.
 // cwd is the bundle when --bundle is absent, as in runc.

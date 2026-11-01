@@ -24,8 +24,8 @@ const usage = `usage:
   lanatt hook create|stop [-socket /run/lanatt/lanatt.sock]`
 
 func main() {
-	if filepath.Base(os.Args[0]) == "lanatt-runc" {
-		fail("lanatt-runc: " + runRuntime(os.Args[1:]).Error())
+	if runtime.IsWrapper(os.Args[0]) {
+		fail(filepath.Base(os.Args[0]) + ": " + runRuntime(os.Args[0], os.Args[1:]).Error())
 	}
 	if len(os.Args) < 2 {
 		fail(usage)
@@ -91,9 +91,13 @@ func runHook(args []string) error {
 	})
 }
 
-// runRuntime is the Docker path: Docker has no hook directory, so lanatt-runc adds the
-// hooks to an annotated bundle and then becomes runc. It only returns on failure.
-func runRuntime(args []string) error {
+// runRuntime is the Docker path: Docker has no hook directory, so lanatt-<runtime> adds the
+// hooks to an annotated bundle and then becomes that runtime. It only returns on failure.
+func runRuntime(argv0 string, args []string) error {
+	target, err := runtime.Target(argv0, os.Getenv("LANATT_RUNTIME"))
+	if err != nil {
+		return err
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -103,11 +107,11 @@ func runRuntime(args []string) error {
 			return err
 		}
 	}
-	runc, err := exec.LookPath("runc")
+	bin, err := exec.LookPath(target)
 	if err != nil {
 		return err
 	}
-	return syscall.Exec(runc, append([]string{"runc"}, args...), os.Environ())
+	return syscall.Exec(bin, append([]string{filepath.Base(target)}, args...), os.Environ())
 }
 
 func injectHooks(path string) error {
@@ -123,7 +127,7 @@ func injectHooks(path string) error {
 	if socket == "" {
 		socket = wire.DefaultSocket
 	}
-	// The hook must run as the lanatt command, not as lanatt-runc.
+	// The hook must run as the lanatt command, not as the wrapper.
 	out, changed, err := runtime.InjectHooks(data, filepath.Join(filepath.Dir(self), "lanatt"), socket)
 	if err != nil || !changed {
 		return err

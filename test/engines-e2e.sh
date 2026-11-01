@@ -1,7 +1,8 @@
 #!/bin/bash
 # Engine end-to-end on a test VM, as root. It installs examples/ as documented. The daemon
 # runs as a rootful Quadlet. A rootless user then starts nginx three ways:
-#   podman run on .64, a rootless Quadlet on .65, rootless Docker Compose on .66.
+#   podman run on .64, a rootless Quadlet on .65, rootless Docker Compose on .66,
+#   and rootless Docker with crun as the target runtime on .69.
 # Usage: engines-e2e.sh up IMAGE-TAR EXAMPLES-DIR   then curl .64/.65/.66 from another LAN host
 #        engines-e2e.sh down
 set -euo pipefail
@@ -33,6 +34,7 @@ up() {
   podman cp "$cid:/usr/local/bin/lanatt" /usr/local/bin/lanatt
   podman rm -f "$cid" >/dev/null
   ln -sf lanatt /usr/local/bin/lanatt-runc
+  ln -sf lanatt /usr/local/bin/lanatt-crun
 
   id "$U" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$U"
   loginctl enable-linger "$U"
@@ -71,11 +73,23 @@ up() {
   as_user docker compose -f "$ex/docker/compose.yaml" -p lanatt up -d --quiet-pull 2>/dev/null
   show "$(as_user docker inspect -f '{{.State.Pid}}' lanatt-web-1)" "rootless docker compose"
 
+  # 4. Rootless Docker with crun as the target runtime.
+  as_user docker run -d --name web-crun --runtime lanatt-crun --network none \
+    --annotation 'io.lanatt.attachments=[{"network":"lan","address":"10.0.1.69","mac":"02:42:0a:00:01:45"}]' \
+    "$NGINX" >/dev/null
+  echo "--- web-crun runtime: $(as_user docker inspect -f '{{.HostConfig.Runtime}}' web-crun)"
+  # runc keeps state.json in its state dir; crun keeps status. Docker names the root runtime-runc either way.
+  state="/run/user/$(uid)/docker/runtime-runc/moby/$(as_user docker inspect -f '{{.Id}}' web-crun)"
+  if [[ -e $state/status && ! -e $state/state.json ]]; then echo "--- web-crun was created by crun"; else
+    echo "--- web-crun was NOT created by crun: $(ls "$state")"; exit 1; fi
+  show "$(as_user docker inspect -f '{{.State.Pid}}' web-crun)" "rootless docker, lanatt-crun"
+
   echo "--- claims"; cat /var/lib/lanatt/claims.json
 }
 
 down() {
   if id "$U" >/dev/null 2>&1; then
+    as_user docker rm -f -t 2 web-crun >/dev/null 2>&1 || true
     as_user docker compose -p lanatt down -t 2 >/dev/null 2>&1 || true
     as_user systemctl --user stop web-quadlet 2>/dev/null || true
     as_user podman rm -f -t 2 web >/dev/null 2>&1 || true
@@ -92,7 +106,7 @@ down() {
   systemctl daemon-reload
   podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
   rm -rf /etc/lanatt /run/lanatt /var/lib/lanatt /etc/containers/oci /etc/containers/containers.conf.d \
-    /usr/local/bin/lanatt /usr/local/bin/lanatt-runc "$DBIN"
+    /usr/local/bin/lanatt /usr/local/bin/lanatt-runc /usr/local/bin/lanatt-crun "$DBIN"
 }
 
 case ${1:-} in
