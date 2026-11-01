@@ -82,4 +82,4 @@ You own the codebase's health, not only the task: leave every touched area clean
 
 ## Releases
 
-- release-please opens the release PR with `GITHUB_TOKEN`. GitHub treats `github-actions[bot]` as a first-time contributor until one of its PRs is merged, so a release PR's CI can wait for approval: `gh run list --status action_required`, then approve it in the UI or with `gh api -X POST repos/BlackDark/lanatt/actions/runs/<id>/approve`.
+- release-please opens the release PR with `GITHUB_TOKEN`, and every CI run on it waits for approval, even after earlier release PRs merged. Approve only the newest run (`gh run list --status action_required`, then `gh api -X POST repos/BlackDark/lanatt/actions/runs/<id>/approve`): older runs share its concurrency group and cancel it. If that happens, `gh run rerun <id>`.
