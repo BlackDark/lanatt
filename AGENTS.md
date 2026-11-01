@@ -23,7 +23,23 @@ Single-context: root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
 ## Stack
 
 Follows https://github.com/BlackDark/agent-presets/blob/main/stack/core.md.
-Deviations: Go instead of TypeScript. This is a privileged host daemon with no UI; see `docs/adr/0004-go.md`.
+Deviations:
+- Go instead of TypeScript. This is a privileged host daemon with no UI; see `docs/adr/0004-go.md`.
+- OCI image although the daemon manages the host: it runs with `--network host --pid host --privileged`. The runtime is `debian:trixie-slim`, not distroless, because the daemon runs `ip` and `nsenter`.
+- No version file: the `v*` tag is the version.
+
+## Map
+
+- `cmd/lanatt`: one binary, `daemon` (root) and `hook create|stop` (caller UID).
+- `internal/claims`: the attachment rules, pure. `internal/daemon`: socket, peer credentials, `ip`/`nsenter`.
+- `test/accept.sh`: kernel acceptance on a dummy parent. `test/podman-e2e.sh`: rootless Podman on the real LAN.
+
+## Gotchas
+
+- `go test` cannot create macvlans. Kernel behaviour is proven only as root on `ssh root@` (Debian 13, amd64, no Go). Build on the workstation and copy the binary or image over.
+- On the test VM, `eth0` and `10.0.1.0/24` are the real LAN. Use only `10.0.1.64`–`10.0.1.69` there. Everything else uses the dummy parent and `10.254.1.0/28`.
+- The host cannot reach its own macvlan attachments. Test reachability from the workstation.
+- Rootless Podman reads hooks only from `/usr/share/containers/oci/hooks.d`.
 
 ## Every change
 

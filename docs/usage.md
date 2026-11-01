@@ -49,6 +49,39 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - `default: true` replaces the netns default route with one via the network gateway. Without it, a default route is added only when the netns has none.
 - The same join again is success. A different address or MAC for the same network and netns, or an address or MAC another netns holds on that network, is refused.
 
+## Container image
+
+The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR by `release.yml` on a `v*` tag. It needs the host netns, the host pid namespace, and root:
+
+```sh
+podman run -d --name lanatt --network host --pid host --privileged \
+  -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
+  ghcr.io/<owner>/lanatt:<version>
+```
+
+Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on the host through the `/run/lanatt` mount. The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
+
+## Podman hooks
+
+Rootless Podman 5.4 reads hooks only from `/usr/share/containers/oci/hooks.d`, unless `hooks_dir` is set in `containers.conf`. `/usr/share/containers/oci/hooks.d/lanatt-create.json`:
+
+```json
+{"version": "1.0.0",
+ "hook": {"path": "/usr/local/bin/lanatt", "args": ["lanatt", "hook", "create", "-socket", "/run/lanatt/lanatt.sock"]},
+ "when": {"annotations": {"^io\\.lanatt\\.attachments$": ".*"}},
+ "stages": ["createRuntime"]}
+```
+
+`lanatt-stop.json` is the same, with `stop` and `"stages": ["poststop"]`. Then, as the allowlisted user:
+
+```sh
+podman run -d --network none \
+  --annotation 'io.lanatt.attachments=[{"network":"lan","address":"10.0.1.64","mac":"02:42:0a:00:01:40"}]' \
+  docker.io/library/nginx:1.29-alpine
+```
+
+The host cannot reach its own macvlan attachments. Test from another LAN host.
+
 ## Acceptance
 
 `test/accept.sh` drives the daemon through the hook against a dummy parent and `10.254.1.0/28`. Root on a test VM only:
@@ -57,4 +90,14 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/lanatt ./cmd/lanatt
 scp /tmp/lanatt test/accept.sh root@:/tmp/
 ssh root@ bash /tmp/accept.sh /tmp/lanatt
+```
+
+Podman end to end. This uses the real LAN, so use only an address you have been given:
+
+```sh
+docker buildx build --platform linux/amd64 -o type=docker,dest=/tmp/lanatt.tar -t localhost/lanatt:dev .
+scp /tmp/lanatt.tar test/podman-e2e.sh root@:/tmp/
+ssh root@ bash /tmp/podman-e2e.sh up /tmp/lanatt.tar 10.0.1.64
+curl http://10.0.1.64/
+ssh root@ bash /tmp/podman-e2e.sh down
 ```
