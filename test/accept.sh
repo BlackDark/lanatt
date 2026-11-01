@@ -167,6 +167,26 @@ start_daemon
 check "claim survives restart" "! hook $U create cf $F '$(join 10.254.1.5 02:42:0a:fe:01:09)'"
 check "dead netns claim dropped" "hook $U create cf $F '$(join 10.254.1.4 02:42:0a:fe:01:04)'"
 
+# 14. Root callers: refused unless allowRoot; then any pid's netns, never the host netns.
+unshare --net sleep 300 &
+R=$!; PIDS+=("$R"); sleep 0.3
+check "root refused without allowRoot" "! hook root create cr $R '$(join 10.254.1.10 02:42:0a:fe:01:10)'"
+stop_daemon
+sed -i 's/"uids":/"allowRoot":true,"uids":/' "$CFG"
+start_daemon
+check "root netns joins with allowRoot" "hook root create cr $R '$(join 10.254.1.10 02:42:0a:fe:01:10)'"
+check "root netns has the address" "in_ns $R -4 -br addr show lan0 | grep -q 10.254.1.10/28"
+netns "$U"; J=$NSPID
+check "root joins another uid's netns" "hook root create cj $J '$(join 10.254.1.11 02:42:0a:fe:01:11)'"
+check "user cannot detach root's claim" "hook $U stop cj 0 '$(join 10.254.1.11 02:42:0a:fe:01:11)' && grep -q 10.254.1.11 $STATE"
+check "root detaches its claim" "hook root stop cj 0 '$(join 10.254.1.11 02:42:0a:fe:01:11)' && ! grep -q 10.254.1.11 $STATE"
+sleep 300 &
+RH=$!; PIDS+=("$RH")
+check "host netns refused for root" "! hook root create crh $RH '$(join 10.254.1.12 02:42:0a:fe:01:12)'"
+unshare --net sleep 300 &
+R2=$!; PIDS+=("$R2"); sleep 0.3
+check "address clash refused for root" "! hook root create crx $R2 '$(join 10.254.1.2 02:42:0a:fe:01:13)'"
+
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"
 echo "$pass passed, $fail failed"
