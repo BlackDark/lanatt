@@ -10,11 +10,11 @@ Root daemon that gives a rootless workload its own presence on a LAN. Domain wor
 
 ### Issue tracker
 
-Local markdown under `.scratch/`. No git remote yet. See `docs/agents/issue-tracker.md`.
+GitHub Issues on `BlackDark/lanatt`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The five canonical role names, stored as a `Status:` line. See `docs/agents/triage-labels.md`.
+The five canonical role names, as issue labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
@@ -26,7 +26,8 @@ Follows https://github.com/BlackDark/agent-presets/blob/main/stack/core.md.
 Deviations:
 - Go instead of TypeScript. This is a privileged host daemon with no UI; see `docs/adr/0004-go.md`.
 - OCI image although the daemon manages the host: it runs with `--network host --pid host --privileged`. The runtime is `debian:trixie-slim`, not distroless, because the daemon runs `ip` and `nsenter`.
-- No version file: the `v*` tag is the version.
+- No version file: release-please keeps the version in `.release-please-manifest.json`. Merging its release PR tags `vX.Y.Z`, then `release.yml` publishes the image.
+- One runner builds both image targets: Go cross-compiles natively, and only the final `apt-get` runs under QEMU. No native arm64 runner.
 
 ## Map
 
@@ -37,11 +38,11 @@ Deviations:
 
 ## Gotchas
 
-- `go test` cannot create macvlans. Kernel behaviour is proven only as root on `ssh root@` (Debian 13, amd64, no Go). Build on the workstation and copy the binary or image over.
-- On the test VM, `eth0` and `10.0.1.0/24` are the real LAN. Use only `10.0.1.64`–`10.0.1.69` there. Everything else uses the dummy parent and `10.254.1.0/28`.
-- The host cannot reach its own macvlan attachments. Test reachability from the workstation.
+- `.private/` (gitignored) holds machine- and network-specific notes: the test VM, its LAN, and the addresses free for tests. Read `.private/README.md` when it exists. Never commit its contents or host names from it.
+- `go test` cannot create macvlans. Kernel and engine behaviour is proven only as root on a Debian test VM (`$VM`). Build on the workstation and copy the binary or image over.
+- `test/engines-e2e.sh` uses the real LAN: only addresses the user has handed out. Everything else uses the dummy parent and `10.254.1.0/28`.
+- The host cannot reach its own macvlan attachments. Test reachability from another LAN host.
 - Podman's default `hooks_dir` is only `/usr/share/containers/oci/hooks.d`. A hook in `/etc/containers/oci/hooks.d` is ignored until the `examples/podman/containers.conf.d` drop-in is installed.
-- The real LAN addresses on the VM: `.64` `podman run`, `.65` Quadlet, `.66` Docker. `.67`–`.69` are free.
 
 ## Every change
 

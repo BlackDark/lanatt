@@ -15,10 +15,10 @@ Docker has no hook directory and no per-container hook option. `lanatt-runc`, a 
   - Under rootless Docker, the plugin only creates the interface, and `dockerd` must move it into the container. Rootless `dockerd` runs inside RootlessKit's user and network namespaces, so it cannot reach a macvlan on the host NIC. This is the same wall as ADR-0001.
   - Managed plugins also expect a root `dockerd`.
 - Authorization or volume plugins. Rejected: neither has a step in network setup.
-- A containerd NRI plugin that adds the hooks to every annotated container, without wrapping `runc`. Deferred: it would be the cleaner form of the wrapper once Docker exposes NRI dependably. Only the wiring would change, not the daemon or the hook. Tracked in `.scratch/engines/issues/02-nri.md`.
+- A containerd NRI plugin that adds the hooks to every annotated container, without wrapping `runc`. Deferred: it would be the cleaner form of the wrapper once Docker exposes NRI dependably. Only the wiring would change, not the daemon or the hook. Tracked in #3.
 
 ## Consequences
 
-- `lanatt-runc` execs `runc`. Docker set up with another OCI runtime, such as `crun`, needs a configurable target. Tracked in `.scratch/engines/issues/01-runtime-target.md`.
+- `lanatt-runc` execs `runc`. Docker set up with another OCI runtime, such as `crun`, needs a configurable target. Tracked in #2.
 - Docker needs `--annotation`, so Docker 24 or later.
 - The Docker command line is less obvious than `--network`: a workload sets both `--runtime lanatt` and the annotation.

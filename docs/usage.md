@@ -51,7 +51,7 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 
 ## Container image
 
-The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR by `release.yml` on a `v*` tag. It needs the host netns, the host pid namespace, and root:
+The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR when a release-please release PR is merged. It needs the host netns, the host pid namespace, and root:
 
 ```sh
 podman run -d --name lanatt --network host --pid host --privileged \
@@ -74,20 +74,20 @@ The host cannot reach its own macvlan attachments. Test from another LAN host.
 
 ## Acceptance
 
-`test/accept.sh` drives the daemon through the hook against a dummy parent and `10.254.1.0/28`. Root on a test VM only:
+`test/accept.sh` drives the daemon through the hook against a dummy parent and `10.254.1.0/28`. Root on a test VM only (`VM=<host>`):
 
 ```sh
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/lanatt ./cmd/lanatt
-scp /tmp/lanatt test/accept.sh root@:/tmp/
-ssh root@ bash /tmp/accept.sh /tmp/lanatt
+scp /tmp/lanatt test/accept.sh root@$VM:/tmp/
+ssh root@$VM bash /tmp/accept.sh /tmp/lanatt
 ```
 
 Engines end to end. This uses the real LAN, so use only the addresses you have been given (`10.0.1.64`–`66`). It installs `examples/` on the VM, starts the daemon as a rootful Quadlet, and starts nginx three ways as a rootless user: `podman run` on `.64`, a Quadlet on `.65`, and Docker Compose on `.66`. It needs `podman`, `docker.io`, `docker-compose`, `rootlesskit`, `slirp4netns`, `uidmap` and `dbus-user-session`.
 
 ```sh
 docker buildx build --platform linux/amd64 -o type=docker,dest=/tmp/lanatt.tar -t localhost/lanatt:dev .
-scp /tmp/lanatt.tar test/engines-e2e.sh root@:/tmp/ && scp -r examples root@:/tmp/lanatt-ex
-ssh root@ bash /tmp/engines-e2e.sh up /tmp/lanatt.tar /tmp/lanatt-ex
+scp /tmp/lanatt.tar test/engines-e2e.sh root@$VM:/tmp/ && scp -r examples root@$VM:/tmp/lanatt-ex
+ssh root@$VM bash /tmp/engines-e2e.sh up /tmp/lanatt.tar /tmp/lanatt-ex
 for a in 64 65 66; do curl -s http://10.0.1.$a/ | grep title; done
-ssh root@ bash /tmp/engines-e2e.sh down
+ssh root@$VM bash /tmp/engines-e2e.sh down
 ```
