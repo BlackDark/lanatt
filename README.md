@@ -68,10 +68,10 @@ The container now answers on its address from any other host on the LAN.
 
 ## Features
 
-- **Engines**: rootless Podman, Podman Quadlets, rootless Docker and Docker Compose. One binary is both the hook and the daemon. Rootful engines are out of scope, because the allowlist refuses UID 0 and rootful engines already have macvlan.
+- **Engines**: Podman, Podman Quadlets, Docker and Docker Compose, rootless and rootful (`"allowRoot": true`). Docker can wrap `runc` or `crun`. One binary is both the hook and the daemon.
 - **Several networks**: one container can join several networks. Interfaces are named `lan0`, `lan1`, … unless you name them.
 - **Routes**: lanatt adds a default route via the network gateway when the container has none. Set `"default": true` on a join to replace an existing one.
-- **Access control**: a UID allowlist. A caller can only join its own containers, never the host netns.
+- **Access control**: a UID allowlist. A caller can only join its own containers, never the host netns. Root is trusted only with `allowRoot`.
 - **Survives restarts**: claims are stored on disk. Claims of containers that are gone are dropped.
 - **Images**: `linux/amd64` and `linux/arm64` on GHCR.
 
@@ -90,6 +90,10 @@ Yes, through the `lanatt-runc` runtime: run the container with `--runtime lanatt
 ### Why can't the host reach the container?
 
 Macvlan does not let the host reach its own attachments through the parent NIC. Give the host a macvlan shim on the same parent, or connect from another LAN host.
+
+### Does it work with rootful containers?
+
+Yes, with `"allowRoot": true` in the config. Rootful containers then use the same annotation and get the same duplicate-address protection as rootless ones. See [ADR-0009](docs/adr/0009-root-callers.md).
 
 ### Does it do IPv6, DHCP or ipvlan?
 

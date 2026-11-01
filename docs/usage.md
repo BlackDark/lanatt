@@ -13,6 +13,7 @@ lanatt daemon -config /etc/lanatt/config.json
   "socket": "/run/lanatt/lanatt.sock",
   "state": "/var/lib/lanatt/claims.json",
   "uids": [1000],
+  "allowRoot": false,
   "networks": [
     {"name": "lab", "parent": "eno1", "prefix": "192.168.10.0/24", "gateway": "192.168.10.1", "driver": "macvlan"}
   ]
@@ -20,7 +21,8 @@ lanatt daemon -config /etc/lanatt/config.json
 ```
 
 - `socket` and `state` default to the values above.
-- `uids` is the allowlist. UID 0 is refused. An empty list fails at load.
+- `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
+- `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
 - `driver` must be `macvlan`; the device is created in bridge mode.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - On start, and before each attach, claims whose netns no longer exists are dropped.
@@ -65,7 +67,7 @@ Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on
 
 The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
 
-- **Podman** finds hooks through `hooks_dir`. Its built-in default is only `/usr/share/containers/oci/hooks.d`, which belongs to packages. lanatt's hooks go in `/etc/containers/oci/hooks.d`, which a `containers.conf.d` drop-in adds. Rootful and rootless Podman both read it. A rootful container with the annotation fails to start: its hook runs as UID 0, which the allowlist refuses.
+- **Podman** finds hooks through `hooks_dir`. Its built-in default is only `/usr/share/containers/oci/hooks.d`, which belongs to packages. lanatt's hooks go in `/etc/containers/oci/hooks.d`, which a `containers.conf.d` drop-in adds. Rootful and rootless Podman both read it. A rootful container's hook runs as UID 0: it needs `"allowRoot": true`, and without it an annotated rootful container fails to start.
 - **Docker** has no hook directory. `lanatt-runc`, a symlink to `lanatt`, is registered as a Docker runtime. On `create` it adds the lanatt hooks to an annotated bundle, then runs `runc`. Unannotated bundles pass through unchanged.
   - **Target runtime:** the wrapper runs the name after `lanatt-`, looked up on `PATH`, so `lanatt-crun` runs `crun`. Register one symlink per target. `LANATT_RUNTIME`, a bare name or an absolute path, overrides the symlink name for callers that can set the environment; Docker cannot.
 
@@ -83,7 +85,7 @@ scp /tmp/lanatt test/accept.sh root@$VM:/tmp/
 ssh root@$VM bash /tmp/accept.sh /tmp/lanatt
 ```
 
-Engines end to end. This uses the real LAN, so use only the addresses you have been given (`10.0.1.64`–`66` and `.69`). It installs `examples/` on the VM, starts the daemon as a rootful Quadlet, and starts nginx three ways as a rootless user: `podman run` on `.64`, a Quadlet on `.65`, Docker Compose on `.66`, and Docker with `lanatt-crun` on `.69`. It needs `podman`, `docker.io`, `docker-compose`, `rootlesskit`, `slirp4netns`, `uidmap` and `dbus-user-session`.
+Engines end to end. This uses the real LAN, so use only the addresses you have been given (`10.0.1.64`–`69`). It installs `examples/` on the VM, starts the daemon as a rootful Quadlet, and starts nginx as a rootless user with `podman run` on `.64`, a Quadlet on `.65`, Docker Compose on `.66`, and Docker with `lanatt-crun` on `.69`. With `allowRoot`, it also starts rootful Podman on `.67` and rootful Docker on `.68`. It needs `podman`, `docker.io`, `docker-compose`, `rootlesskit`, `slirp4netns`, `uidmap` and `dbus-user-session`.
 
 ```sh
 docker buildx build --platform linux/amd64 -o type=docker,dest=/tmp/lanatt.tar -t localhost/lanatt:dev .

@@ -2,6 +2,7 @@
   "socket": "/run/lanatt/lanatt.sock",
   "state": "/var/lib/lanatt/claims.json",
   "uids": [1000],
+  "allowRoot": false,
   "networks": [
     {"name": "lan", "parent": "eth0", "prefix": "10.0.1.0/24", "gateway": "10.0.1.1", "driver": "macvlan"}
   ]

@@ -6,3 +6,5 @@ The daemon can put a new host on the physical LAN. It accepts a request only fro
 
 - Any local user who can reach the daemon. Rejected: any account could take an address on the LAN.
 - A per-UID list of allowed addresses and MACs. Deferred: one admin on one host does not need it yet.
+
+Amended by ADR-0009: UID 0 is accepted only with `"allowRoot": true`, and is not bound to its own pids.
