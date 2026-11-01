@@ -85,6 +85,9 @@ func Parse(data []byte) (Config, error) {
 		}
 		cfg.UIDs[uid] = true
 	}
+	if len(cfg.UIDs) == 0 {
+		return Config{}, errors.New("config: uids is empty, so every caller would be refused")
+	}
 	for _, rn := range raw.Networks {
 		n, err := parseNetwork(rn)
 		if err != nil {

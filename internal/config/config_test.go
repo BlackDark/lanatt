@@ -47,4 +47,7 @@ func TestParseRefuses(t *testing.T) {
 	if _, err := Parse([]byte(`{"uid":[1000]}`)); err == nil {
 		t.Error("unknown field accepted")
 	}
+	if _, err := Parse([]byte(`{"uids":[]}`)); err == nil {
+		t.Error("empty allowlist accepted")
+	}
 }

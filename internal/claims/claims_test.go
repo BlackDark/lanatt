@@ -10,7 +10,7 @@ import (
 
 func nets(t *testing.T) map[string]config.Network {
 	t.Helper()
-	cfg, err := config.Parse([]byte(`{"networks":[
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
 		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
 		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan"}]}`))
 	if err != nil {

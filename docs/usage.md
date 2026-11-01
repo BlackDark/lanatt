@@ -20,7 +20,7 @@ lanatt daemon -config /etc/lanatt/config.json
 ```
 
 - `socket` and `state` default to the values above.
-- `uids` is the allowlist. UID 0 is refused.
+- `uids` is the allowlist. UID 0 is refused. An empty list fails at load.
 - `driver` must be `macvlan`; the device is created in bridge mode.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - On start, and before each attach, claims whose netns no longer exists are dropped.
