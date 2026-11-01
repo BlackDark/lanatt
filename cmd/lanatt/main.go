@@ -6,21 +6,27 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"lanatt/internal/config"
 	"lanatt/internal/daemon"
 	"lanatt/internal/hook"
+	"lanatt/internal/runtime"
 	"lanatt/internal/wire"
 )
 
 const usage = `usage:
   lanatt daemon [-config /etc/lanatt/config.json]
-  lanatt hook create|stop [-socket /run/lanatt.sock]`
+  lanatt hook create|stop [-socket /run/lanatt/lanatt.sock]`
 
 func main() {
+	if filepath.Base(os.Args[0]) == "lanatt-runc" {
+		fail("lanatt-runc: " + runRuntime(os.Args[1:]).Error())
+	}
 	if len(os.Args) < 2 {
 		fail(usage)
 	}
@@ -83,4 +89,48 @@ func runHook(args []string) error {
 	return hook.Run(args[0], os.Stdin, func(req wire.Request) error {
 		return wire.Call(*socket, req, 30*time.Second)
 	})
+}
+
+// runRuntime is the Docker path: Docker has no hook directory, so lanatt-runc adds the
+// hooks to an annotated bundle and then becomes runc. It only returns on failure.
+func runRuntime(args []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if bundle := runtime.Bundle(args, cwd); bundle != "" {
+		if err := injectHooks(filepath.Join(bundle, "config.json")); err != nil {
+			return err
+		}
+	}
+	runc, err := exec.LookPath("runc")
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(runc, append([]string{"runc"}, args...), os.Environ())
+}
+
+func injectHooks(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	socket := os.Getenv("LANATT_SOCKET")
+	if socket == "" {
+		socket = wire.DefaultSocket
+	}
+	// The hook must run as the lanatt command, not as lanatt-runc.
+	out, changed, err := runtime.InjectHooks(data, filepath.Join(filepath.Dir(self), "lanatt"), socket)
+	if err != nil || !changed {
+		return err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, fi.Mode())
 }

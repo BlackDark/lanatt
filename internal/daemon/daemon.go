@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -52,6 +53,9 @@ func New(cfg config.Config) (*Server, error) {
 
 // Listen opens the socket. Any local user may connect; peer credentials decide.
 func (s *Server) Listen() (net.Listener, error) {
+	if err := os.MkdirAll(filepath.Dir(s.cfg.Socket), 0o755); err != nil {
+		return nil, err
+	}
 	if err := os.Remove(s.cfg.Socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}

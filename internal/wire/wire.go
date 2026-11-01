@@ -12,7 +12,7 @@ import (
 const AnnotationKey = "io.lanatt.attachments"
 
 // DefaultSocket is where the daemon listens unless config says otherwise.
-const DefaultSocket = "/run/lanatt.sock"
+const DefaultSocket = "/run/lanatt/lanatt.sock"
 
 const (
 	OpAttach = "attach"
