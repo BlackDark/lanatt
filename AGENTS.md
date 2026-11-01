@@ -79,3 +79,8 @@ You own the codebase's health, not only the task: leave every touched area clean
 - `sudo`, system packages, global installs: the user runs them; ask with what and why.
 - Running user processes stay up; test on other ports.
 - Language: code, comments, docs, commits in English.
+
+## Releases
+
+- release-please opens the release PR with `GITHUB_TOKEN`. GitHub treats `github-actions[bot]` as a first-time contributor until one of its PRs is merged, so the first release PR's CI waits for approval: `gh run list --status action_required`, then approve it in the UI or with `gh api -X POST repos/BlackDark/lanatt/actions/runs/<id>/approve`.
+- `release-as: 0.1.0` in `release-please-config.json` exists only for the first release. Remove it once `v0.1.0` is out.
