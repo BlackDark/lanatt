@@ -34,7 +34,7 @@ Deviations:
 - `cmd/lanatt`: one binary, `daemon` (root) and `hook create|stop` (caller UID).
 - `internal/claims`: the attachment rules, pure. `internal/daemon`: socket, peer credentials, `ip`/`nsenter`.
 - `test/accept.sh`: kernel acceptance on a dummy parent. `test/engines-e2e.sh`: rootless Podman, Quadlet and Docker on the real LAN, using `examples/`.
-- `internal/runtime`: `lanatt-runc`, the Docker runtime wrapper that adds the hooks.
+- `internal/runtime`: `lanatt-<runtime>` (`lanatt-runc`, `lanatt-crun`), the Docker runtime wrapper that adds the hooks.
 
 ## Gotchas
 

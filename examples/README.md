@@ -35,13 +35,14 @@ systemctl --user daemon-reload && systemctl --user start web
 
 ## Docker
 
-Docker has no hook directory. `lanatt-runc` is a runtime wrapper: on `create`, it adds the lanatt hooks to an annotated bundle, then runs `runc`. Install it as a symlink, as root:
+Docker has no hook directory. `lanatt-runc` is a runtime wrapper: on `create`, it adds the lanatt hooks to an annotated bundle, then runs `runc`. The name after `lanatt-` picks the runtime it runs, so `lanatt-crun` runs `crun`. Install one symlink per runtime, as root:
 
 ```sh
 ln -sf lanatt /usr/local/bin/lanatt-runc
+ln -sf lanatt /usr/local/bin/lanatt-crun   # only if you use crun
 ```
 
-Register it in the daemon config. Rootful Docker reads `/etc/docker/daemon.json`; rootless Docker reads `~/.config/docker/daemon.json`. Then restart Docker:
+Register them in the daemon config (`lanatt` and `lanatt-crun` in [`daemon.json`](docker/daemon.json)). Rootful Docker reads `/etc/docker/daemon.json`; rootless Docker reads `~/.config/docker/daemon.json`. Then restart Docker:
 
 ```sh
 install -D -m 644 examples/docker/daemon.json ~/.config/docker/daemon.json

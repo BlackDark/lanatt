@@ -66,7 +66,8 @@ Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on
 The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
 
 - **Podman** finds hooks through `hooks_dir`. Its built-in default is only `/usr/share/containers/oci/hooks.d`, which belongs to packages. lanatt's hooks go in `/etc/containers/oci/hooks.d`, which a `containers.conf.d` drop-in adds. Rootful and rootless Podman both read it. A rootful container with the annotation fails to start: its hook runs as UID 0, which the allowlist refuses.
-- **Docker** has no hook directory. `lanatt-runc`, a symlink to `lanatt`, is registered as a Docker runtime. On `create` it adds the lanatt hooks to an annotated bundle, then runs `runc`. Unannotated bundles pass through unchanged. It finds `runc` on `PATH`.
+- **Docker** has no hook directory. `lanatt-runc`, a symlink to `lanatt`, is registered as a Docker runtime. On `create` it adds the lanatt hooks to an annotated bundle, then runs `runc`. Unannotated bundles pass through unchanged.
+  - **Target runtime:** the wrapper runs the name after `lanatt-`, looked up on `PATH`, so `lanatt-crun` runs `crun`. Register one symlink per target. `LANATT_RUNTIME`, a bare name or an absolute path, overrides the symlink name for callers that can set the environment; Docker cannot.
 
 Ready-to-install files for Podman, Quadlet, Docker and Compose are in [`examples/`](../examples/README.md).
 
@@ -82,7 +83,7 @@ scp /tmp/lanatt test/accept.sh root@$VM:/tmp/
 ssh root@$VM bash /tmp/accept.sh /tmp/lanatt
 ```
 
-Engines end to end. This uses the real LAN, so use only the addresses you have been given (`10.0.1.64`–`66`). It installs `examples/` on the VM, starts the daemon as a rootful Quadlet, and starts nginx three ways as a rootless user: `podman run` on `.64`, a Quadlet on `.65`, and Docker Compose on `.66`. It needs `podman`, `docker.io`, `docker-compose`, `rootlesskit`, `slirp4netns`, `uidmap` and `dbus-user-session`.
+Engines end to end. This uses the real LAN, so use only the addresses you have been given (`10.0.1.64`–`66` and `.69`). It installs `examples/` on the VM, starts the daemon as a rootful Quadlet, and starts nginx three ways as a rootless user: `podman run` on `.64`, a Quadlet on `.65`, Docker Compose on `.66`, and Docker with `lanatt-crun` on `.69`. It needs `podman`, `docker.io`, `docker-compose`, `rootlesskit`, `slirp4netns`, `uidmap` and `dbus-user-session`.
 
 ```sh
 docker buildx build --platform linux/amd64 -o type=docker,dest=/tmp/lanatt.tar -t localhost/lanatt:dev .

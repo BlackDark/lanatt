@@ -19,6 +19,6 @@ Docker has no hook directory and no per-container hook option. `lanatt-runc`, a 
 
 ## Consequences
 
-- `lanatt-runc` execs `runc`. Docker set up with another OCI runtime, such as `crun`, needs a configurable target. Tracked in #2.
+- `lanatt-<runtime>` execs `<runtime>`: `lanatt-runc` runs `runc`, `lanatt-crun` runs `crun`. Docker cannot give a runtime entry its own environment, so the target lives in the symlink name. `LANATT_RUNTIME` overrides it elsewhere (#2).
 - Docker needs `--annotation`, so Docker 24 or later.
 - The Docker command line is less obvious than `--network`: a workload sets both `--runtime lanatt` and the annotation.

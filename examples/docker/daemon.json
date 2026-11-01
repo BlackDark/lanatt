@@ -1,5 +1,6 @@
 {
   "runtimes": {
-    "lanatt": {"path": "/usr/local/bin/lanatt-runc"}
+    "lanatt": {"path": "/usr/local/bin/lanatt-runc"},
+    "lanatt-crun": {"path": "/usr/local/bin/lanatt-crun"}
   }
 }
