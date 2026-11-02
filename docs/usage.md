@@ -53,13 +53,19 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 
 ## Container image
 
-The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR when a release-please release PR is merged. It needs the host netns, the host pid namespace, and root:
+The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR when a release-please release PR is merged. It needs the host netns, the host pid namespace, root, and three capabilities:
 
 ```sh
-podman run -d --name lanatt --network host --pid host --privileged \
+podman run -d --name lanatt --network host --pid host \
+  --cap-drop=ALL --cap-add=NET_ADMIN,SYS_ADMIN,SYS_PTRACE \
+  --security-opt apparmor=unconfined --security-opt no-new-privileges --read-only \
   -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
   ghcr.io/blackdark/lanatt:<version>
 ```
+
+- `NET_ADMIN` creates the macvlan and configures it. `SYS_ADMIN` enters the workload netns (`setns`). `SYS_PTRACE` opens another user's `/proc/<pid>/ns/net`. Dropping any one of them breaks the join; this was checked one by one.
+- AppArmor: Podman's `containers-default` profile denies reading another process's `/proc/<pid>/ns/net` even with `SYS_PTRACE`, so the container runs unconfined. Docker applies its own `docker-default` profile; running the daemon under Docker with these flags is untested.
+- The root filesystem can be read-only: the daemon writes only to the `/run/lanatt` and `/var/lib/lanatt` mounts.
 
 Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on the host through the `/run/lanatt` mount.
 

@@ -25,7 +25,7 @@ Single-context: root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
 Follows https://github.com/BlackDark/agent-presets/blob/main/stack/core.md.
 Deviations:
 - Go instead of TypeScript. This is a privileged host daemon with no UI; see `docs/adr/0004-go.md`.
-- OCI image although the daemon manages the host: it runs with `--network host --pid host --privileged`. The runtime is `debian:trixie-slim`, not distroless, because the daemon runs `ip` and `nsenter`.
+- OCI image although the daemon manages the host: it runs with `--network host --pid host`, `NET_ADMIN SYS_ADMIN SYS_PTRACE`, AppArmor unconfined, read-only. The runtime is `debian:trixie-slim`, not distroless, because the daemon runs `ip` and `nsenter`.
 - No version file: release-please keeps the version in `.release-please-manifest.json`. Merging its release PR tags `vX.Y.Z`, then `release.yml` publishes the image.
 - One runner builds both image targets: Go cross-compiles natively, and only the final `apt-get` runs under QEMU. No native arm64 runner.
 
@@ -39,6 +39,7 @@ Deviations:
 ## Gotchas
 
 - `.private/` (gitignored) holds machine- and network-specific notes: the test VM, its LAN, and the addresses free for tests. Read `.private/README.md` when it exists. Never commit its contents or host names from it.
+- Any binary whose name starts with `lanatt-` runs as the runtime wrapper. Name test copies of the binary `lanatt`.
 - `go test` cannot create macvlans. Kernel and engine behaviour is proven only as root on a Debian test VM (`$VM`). Build on the workstation and copy the binary or image over.
 - `test/engines-e2e.sh` uses the real LAN: only addresses the user has handed out. Everything else uses the dummy parent and `10.254.1.0/28`.
 - The host cannot reach its own macvlan attachments. Test reachability from another LAN host.

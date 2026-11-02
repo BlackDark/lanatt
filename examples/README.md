@@ -56,7 +56,7 @@ docker run -d --runtime lanatt --network none \
 
 Compose: `docker compose -f examples/docker/compose.yaml up -d`.
 
-The lanatt daemon itself can run under Docker with the same flags as Podman: `--network host --pid host --privileged` and the three volumes.
+The lanatt daemon itself can run under Docker with the same flags as Podman (see [`docs/usage.md`](../docs/usage.md#container-image)) and the three volumes. That form is untested.
 
 ## Testing
 
