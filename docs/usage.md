@@ -42,7 +42,7 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 
 ```json
 [
-  {"network": "lab", "address": "192.168.10.50", "mac": "02:42:c0:a8:0a:32"},
+  {"network": "lab", "address": "192.168.10.200", "mac": "02:42:c0:a8:0a:c8"},
   {"network": "iot", "address": "10.20.0.50", "mac": "02:42:0a:14:00:32", "interface": "iot", "default": true}
 ]
 ```
