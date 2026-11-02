@@ -1,0 +1,24 @@
+# /etc/systemd/system/lanatt-shim@.service: a host macvlan so the host reaches its own attachments.
+# Instance name = parent NIC: `systemctl enable --now lanatt-shim@eth0`.
+# Settings in /etc/lanatt/shim-<parent>.env, see shim-eth0.env.
+[Unit]
+Description=lanatt host shim on %i
+After=network-online.target
+Wants=network-online.target
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device
+Before=lanatt.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/lanatt/shim-%i.env
+ExecStartPre=-/usr/sbin/ip link del ${SHIM}
+ExecStart=/usr/sbin/ip link add ${SHIM} link %i type macvlan mode bridge
+ExecStart=/usr/sbin/ip addr add ${ADDRESS}/32 dev ${SHIM}
+ExecStart=/usr/sbin/ip link set ${SHIM} up
+ExecStart=/usr/sbin/ip route add ${ROUTE} dev ${SHIM} metric 50
+ExecStop=/usr/sbin/ip link del ${SHIM}
+
+[Install]
+WantedBy=multi-user.target

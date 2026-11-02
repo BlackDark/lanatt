@@ -9,3 +9,5 @@ A second hook on stop drops the daemon's claim. The interface itself dies with t
 - A root-owned file keyed by container name. Rejected: the engine assigns those names.
 - The workload process calling the daemon after it has started. Rejected: that is later than the hook, so the process can come up before the attachment exists.
 - lanatt creating the host shim for each network. Rejected: the shim must exist before any workload starts and must survive a reboot, which is host network configuration.
+
+The shim is admin-owned host configuration. `examples/shim/` ships a systemd unit that creates it at boot.
