@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/BlackDark/lanatt/compare/v0.2.0...v0.3.0) (2026-11-02)
+
+
+### Features
+
+* attach static binaries to each release ([5f1a1eb](https://github.com/BlackDark/lanatt/commit/5f1a1ebb0078ae118249177adc45a01a152a74e9)), closes [#16](https://github.com/BlackDark/lanatt/issues/16)
+* networks can limit the addresses they hand out ([6b246e9](https://github.com/BlackDark/lanatt/commit/6b246e900caec9a70d6601bfdc2b918a8992d594)), closes [#18](https://github.com/BlackDark/lanatt/issues/18)
+* run the daemon container without --privileged ([995ab84](https://github.com/BlackDark/lanatt/commit/995ab849aeb8ea2635367cf84ef621502c9fddc1)), closes [#17](https://github.com/BlackDark/lanatt/issues/17)
+
+
+### Documentation
+
+* release PR runs always need approval, approve only the newest ([b811c6c](https://github.com/BlackDark/lanatt/commit/b811c6c49e517c793f2a2dc1a8b9f9ec3586ce51))
+* usage example joins an address inside the range ([3ae468d](https://github.com/BlackDark/lanatt/commit/3ae468d5532e02f3caa5183f6742d7cac173d3fe))
+
 ## [0.2.0](https://github.com/BlackDark/lanatt/compare/v0.1.0...v0.2.0) (2026-11-01)
 
 
