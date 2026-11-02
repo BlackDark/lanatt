@@ -38,7 +38,7 @@ jobs:
     if: needs.release-please.outputs.created == 'true'
     uses: ./.github/workflows/release.yml # zizmor: ignore[self-repository]
     permissions:
-      contents: read
+      contents: write
       packages: write
     with:
       tag: ${{ needs.release-please.outputs.tag }}

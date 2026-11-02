@@ -41,7 +41,7 @@ podman run -d --name lanatt --network host --pid host --privileged \
 Then, once per host:
 
 1. Write `/etc/lanatt/config.json`: [example](examples/config.json).
-2. Copy the `lanatt` binary from the image to `/usr/local/bin`, because the hook runs on the host.
+2. Install the `lanatt` binary from the [latest release](https://github.com/BlackDark/lanatt/releases/latest) to `/usr/local/bin`, because the hook runs on the host.
 3. Wire it into your engine: Podman hook files, or the `lanatt-runc` runtime for Docker.
 
 Step-by-step commands, and a Quadlet unit for the daemon, are in [examples/](examples/README.md).
