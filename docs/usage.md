@@ -61,11 +61,11 @@ podman run -d --name lanatt --network host --pid host --privileged \
   ghcr.io/blackdark/lanatt:<version>
 ```
 
-Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on the host through the `/run/lanatt` mount. The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
+Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on the host through the `/run/lanatt` mount.
 
 ## Engines
 
-The hook runs on the host. Copy the binary out of the image with `podman cp <container>:/usr/local/bin/lanatt /usr/local/bin/lanatt`.
+The hook runs on the host. Each release attaches `lanatt-linux-amd64`, `lanatt-linux-arm64` and `SHA256SUMS`; install the binary as `/usr/local/bin/lanatt` (see [`examples/`](../examples/README.md)). The binary is the same as the one in the image.
 
 - **Podman** finds hooks through `hooks_dir`. Its built-in default is only `/usr/share/containers/oci/hooks.d`, which belongs to packages. lanatt's hooks go in `/etc/containers/oci/hooks.d`, which a `containers.conf.d` drop-in adds. Rootful and rootless Podman both read it. A rootful container's hook runs as UID 0: it needs `"allowRoot": true`, and without it an annotated rootful container fails to start.
 - **Docker** has no hook directory. `lanatt-runc`, a symlink to `lanatt`, is registered as a Docker runtime. On `create` it adds the lanatt hooks to an annotated bundle, then runs `runc`. Unannotated bundles pass through unchanged.

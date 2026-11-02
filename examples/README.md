@@ -6,9 +6,11 @@ Set up the host once, as root:
 install -D -m 644 examples/config.json /etc/lanatt/config.json   # edit uids, allowRoot, parent, prefix, gateway
 install -D -m 644 examples/podman/containers.conf.d/lanatt.conf /etc/containers/containers.conf.d/lanatt.conf
 install -D -m 644 -t /etc/containers/oci/hooks.d examples/podman/hooks.d/*.json
-# The hook runs on the host: copy the binary out of the image.
-podman create --name lanatt-cp ghcr.io/blackdark/lanatt:latest
-podman cp lanatt-cp:/usr/local/bin/lanatt /usr/local/bin/lanatt && podman rm lanatt-cp
+# The hook runs on the host: install the release binary (amd64 or arm64) and check it.
+arch=$(dpkg --print-architecture)   # or: uname -m, mapped to amd64/arm64
+base=https://github.com/BlackDark/lanatt/releases/latest/download
+cd "$(mktemp -d)" && curl -fsSLO "$base/lanatt-linux-$arch" -O "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS && install -m 755 "lanatt-linux-$arch" /usr/local/bin/lanatt
 ```
 
 Daemon as a rootful Quadlet:
