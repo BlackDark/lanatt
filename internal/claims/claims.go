@@ -98,6 +98,9 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 	if addr == n.Gateway {
 		return Planned{}, fmt.Errorf("address %s is the gateway", addr)
 	}
+	if !n.InRanges(addr) {
+		return Planned{}, fmt.Errorf("address %s is outside the network's ranges", addr)
+	}
 	mac, err := parseMAC(j.MAC)
 	if err != nil {
 		return Planned{}, err

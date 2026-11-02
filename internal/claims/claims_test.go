@@ -169,3 +169,17 @@ func TestSaveLoad(t *testing.T) {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
 }
+
+func TestOutsideRangesRefused(t *testing.T) {
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","ranges":["10.254.1.2-10.254.1.4"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Plan(State{}, cfg.Networks, 1000, "c", 1, []wire.Join{{Network: "a", Address: "10.254.1.5", MAC: "02:00:00:00:00:05"}}); err == nil {
+		t.Error("address outside ranges admitted")
+	}
+	if _, err := Plan(State{}, cfg.Networks, 1000, "c", 1, []wire.Join{{Network: "a", Address: "10.254.1.3", MAC: "02:00:00:00:00:03"}}); err != nil {
+		t.Errorf("address inside ranges refused: %v", err)
+	}
+}

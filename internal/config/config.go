@@ -23,6 +23,8 @@ type Network struct {
 	Prefix  netip.Prefix
 	Gateway netip.Addr
 	Driver  string
+	// Ranges limits which addresses callers may claim; empty means the whole prefix.
+	Ranges []Range
 }
 
 // Config is the validated daemon config.
@@ -36,11 +38,12 @@ type Config struct {
 }
 
 type rawNetwork struct {
-	Name    string `json:"name"`
-	Parent  string `json:"parent"`
-	Prefix  string `json:"prefix"`
-	Gateway string `json:"gateway"`
-	Driver  string `json:"driver"`
+	Name    string   `json:"name"`
+	Parent  string   `json:"parent"`
+	Prefix  string   `json:"prefix"`
+	Gateway string   `json:"gateway"`
+	Driver  string   `json:"driver"`
+	Ranges  []string `json:"ranges"`
 }
 
 type rawConfig struct {
@@ -139,6 +142,9 @@ func parseNetwork(rn rawNetwork) (Network, error) {
 	n := Network{Name: rn.Name, Parent: rn.Parent, Prefix: prefix, Gateway: gw, Driver: rn.Driver}
 	if !n.IsHost(gw) {
 		return Network{}, fmt.Errorf("gateway %s is not a host address in %s", gw, prefix)
+	}
+	if n.Ranges, err = parseRanges(n, rn.Ranges); err != nil {
+		return Network{}, err
 	}
 	return n, nil
 }

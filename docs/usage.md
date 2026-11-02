@@ -15,7 +15,8 @@ lanatt daemon -config /etc/lanatt/config.json
   "uids": [1000],
   "allowRoot": false,
   "networks": [
-    {"name": "lab", "parent": "eno1", "prefix": "192.168.10.0/24", "gateway": "192.168.10.1", "driver": "macvlan"}
+    {"name": "lab", "parent": "eno1", "prefix": "192.168.10.0/24", "gateway": "192.168.10.1", "driver": "macvlan",
+     "ranges": ["192.168.10.200-192.168.10.219"]}
   ]
 }
 ```
@@ -24,6 +25,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
 - `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
 - `driver` must be `macvlan`; the device is created in bridge mode.
+- `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - On start, and before each attach, claims whose netns no longer exists are dropped.
 - On start, host macvlans named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
