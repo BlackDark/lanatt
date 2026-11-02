@@ -71,6 +71,7 @@ The container now answers on its address from any other host on the LAN.
 - **Engines**: Podman, Podman Quadlets, Docker and Docker Compose, rootless and rootful (`"allowRoot": true`). Docker can wrap `runc` or `crun`. One binary is both the hook and the daemon.
 - **Several networks**: one container can join several networks. Interfaces are named `lan0`, `lan1`, … unless you name them.
 - **Routes**: lanatt adds a default route via the network gateway when the container has none. Set `"default": true` on a join to replace an existing one.
+- **Address ranges**: each network can limit which addresses callers may claim, so lanatt stays out of your DHCP pool and away from static hosts.
 - **Access control**: a UID allowlist. A caller can only join its own containers, never the host netns. Root is trusted only with `allowRoot`.
 - **Survives restarts**: claims are stored on disk. Claims of containers that are gone are dropped.
 - **Images**: `linux/amd64` and `linux/arm64` on GHCR.
