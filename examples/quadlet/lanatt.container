@@ -1,4 +1,6 @@
 # /etc/containers/systemd/lanatt.container (rootful): the lanatt daemon.
+# Least privilege, see docs/usage.md "Container image": three capabilities, AppArmor off
+# because the default profile denies reading other users' /proc/<pid>/ns/net.
 [Unit]
 Description=lanatt: LAN attachments for rootless workloads
 Wants=network-online.target
@@ -8,7 +10,11 @@ After=network-online.target
 Image=ghcr.io/blackdark/lanatt:latest
 ContainerName=lanatt
 Network=host
-PodmanArgs=--pid=host --privileged
+PodmanArgs=--pid=host --security-opt=apparmor=unconfined
+DropCapability=ALL
+AddCapability=NET_ADMIN SYS_ADMIN SYS_PTRACE
+NoNewPrivileges=true
+ReadOnly=true
 Volume=/etc/lanatt:/etc/lanatt:ro
 Volume=/run/lanatt:/run/lanatt
 Volume=/var/lib/lanatt:/var/lib/lanatt

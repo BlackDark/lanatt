@@ -30,10 +30,12 @@ A rootless container cannot create a macvlan, because the host NIC is outside it
 
 ## Install
 
-Run the daemon (rootful, host network and pid namespace):
+Run the daemon (rootful, host network and pid namespace, three capabilities):
 
 ```bash
-podman run -d --name lanatt --network host --pid host --privileged \
+podman run -d --name lanatt --network host --pid host \
+  --cap-drop=ALL --cap-add=NET_ADMIN,SYS_ADMIN,SYS_PTRACE \
+  --security-opt apparmor=unconfined --security-opt no-new-privileges --read-only \
   -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
   ghcr.io/blackdark/lanatt:latest
 ```
