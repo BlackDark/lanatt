@@ -41,7 +41,7 @@ ip link set "$PARENT" up
 cat >"$CFG" <<EOF
 {"socket":"$SOCK","state":"$STATE","uids":[$(id -u "$U")],
  "networks":[{"name":"lab","parent":"$PARENT","prefix":"10.254.1.0/28","gateway":"$GW","driver":"macvlan"},
-  {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan"}]}
+  {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]}]}
 EOF
 
 start_daemon() {
@@ -153,6 +153,11 @@ two='[{"network":"lab","address":"10.254.1.8","mac":"02:42:0a:fe:01:08"},{"netwo
 check "two networks in one annotation" "hook $U create cg $G '$two'"
 check "first is lan0" "in_ns $G -4 -br addr show lan0 | grep -q 10.254.1.8/28"
 check "second is lan1" "in_ns $G -4 -br addr show lan1 | grep -q 10.254.1.18/28"
+
+# 11b. lab2 only hands out .17-.20.
+netns "$U"; K=$NSPID
+check "address outside ranges refused" "! hook $U create ck $K '[{\"network\":\"lab2\",\"address\":\"10.254.1.25\",\"mac\":\"02:42:0a:fe:01:25\"}]'"
+check "address inside ranges joins" "hook $U create ck $K '[{\"network\":\"lab2\",\"address\":\"10.254.1.19\",\"mac\":\"02:42:0a:fe:01:19\"}]'"
 
 # 12. A requested name that the netns already uses is refused and the device survives.
 netns "$U" def; I=$NSPID
