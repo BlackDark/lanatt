@@ -92,7 +92,7 @@ Yes, through the `lanatt-runc` runtime: run the container with `--runtime lanatt
 
 ### Why can't the host reach the container?
 
-Macvlan does not let the host reach its own attachments through the parent NIC. Give the host a macvlan shim on the same parent, or connect from another LAN host.
+Macvlan does not let the host reach its own attachments through the parent NIC. Containers on the same host that use an engine bridge network are affected too. Give the host a macvlan shim on the same parent: [examples/](examples/README.md#host-shim) has a systemd unit that survives reboots. Other LAN hosts and other lanatt containers reach the attachment without one.
 
 ### Does it work with rootful containers?
 

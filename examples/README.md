@@ -58,6 +58,23 @@ Compose: `docker compose -f examples/docker/compose.yaml up -d`.
 
 The lanatt daemon itself can run under Docker with the same flags as Podman (see [`docs/usage.md`](../docs/usage.md#container-image)) and the three volumes. That form is untested.
 
+## Host shim
+
+The host cannot reach its own macvlan attachments, and neither can containers whose traffic leaves through the host (engine bridge networks, host network). That matters when the host uses a service on an attachment, such as a LAN-wide DNS server. A shim is a macvlan on the same parent, owned by the host. lanatt does not create it (ADR-0006): it must exist before the daemon starts and outlive the daemon.
+
+[`shim/lanatt-shim@.service`](shim/lanatt-shim@.service) creates it at boot, independent of the network manager. The instance name is the parent NIC:
+
+```sh
+install -m 644 examples/shim/lanatt-shim@.service /etc/systemd/system/
+install -D -m 644 examples/shim/shim-eth0.env /etc/lanatt/shim-eth0.env   # edit SHIM, ADDRESS, ROUTE
+systemctl daemon-reload && systemctl enable --now lanatt-shim@eth0
+```
+
+- `ADDRESS` is a free LAN address for the host's side, outside every lanatt range. It is a `/32`, so the host's normal LAN route stays on the parent.
+- `ROUTE` is what goes through the shim, normally the lanatt ranges (`10.0.1.64/29` covers `.64`–`.71`).
+
+Tested on Debian 13 with systemd-networkd: the host and a Docker bridge container reach an attachment through the shim, also after a reboot, and the host's own LAN traffic is unaffected. NetworkManager users can create the same macvlan with `nmcli connection add type macvlan dev eth0 mode bridge ...` instead.
+
 ## Testing
 
 Test from another LAN host: the host cannot reach its own macvlan attachments. `test/engines-e2e.sh` installs these files on a test VM and checks every workload.
