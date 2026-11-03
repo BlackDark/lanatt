@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/BlackDark/lanatt/compare/v0.3.0...v0.3.1) (2026-11-03)
+
+
+### Documentation
+
+* host shim example so the host reaches its attachments ([f28531c](https://github.com/BlackDark/lanatt/commit/f28531c21c2f1478917f7c2745c71efaf61a92fa))
+* performance notes and Podman networking references ([8a8cd02](https://github.com/BlackDark/lanatt/commit/8a8cd02772a0561ab59f762f7b0bd712a1dbe57f))
+
 ## [0.3.0](https://github.com/BlackDark/lanatt/compare/v0.2.0...v0.3.0) (2026-11-02)
 
 
