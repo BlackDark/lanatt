@@ -83,6 +83,32 @@ Ready-to-install files for Podman, Quadlet, Docker and Compose are in [`examples
 
 The host cannot reach its own macvlan attachments. Test from another LAN host.
 
+## Performance
+
+An attachment is a kernel macvlan, so its traffic takes the kernel's normal path, like the host's own NIC. No user-space forwarder sits in between, unlike Podman's rootless networks:
+
+| Path | Datapath |
+|---|---|
+| lanatt attachment | Kernel macvlan |
+| `--network host`, systemd socket activation | Kernel, the host's own sockets |
+| `pasta` (rootless default since Podman 5.0) | User space, no NAT |
+| `slirp4netns` (legacy, planned for removal in Podman 6) | User space with NAT, the slowest |
+
+The Podman-side ordering comes from the references below. lanatt's own throughput has not been benchmarked.
+
+- **Fastest:** run the workload with `--network none`, so the attachment is its only network and every packet, inbound and outbound, stays in the kernel. The examples do this.
+- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the default route stays on the engine network unless the join sets `"default": true`. Without that flag, internet-bound traffic goes through `pasta`; LAN traffic for the prefix still uses the attachment.
+- Port publishing (`-p`, `PublishPort=`) does not apply to the attachment: services listen on the attachment's address directly.
+- The MTU is the parent NIC's.
+
+## References
+
+Rootless Podman networking, for workloads that combine lanatt with Podman's own networks:
+
+- [eriksjolund/podman-networking-docs](https://github.com/eriksjolund/podman-networking-docs): methods compared by performance, source address preservation and binding, with Quadlet examples. Covers socket activation and pasta options such as `--map-gw` and `-T`.
+- [Podman pasta vs slirp4netns](https://sanj.dev/post/podman-pasta-vs-slirp4netns-networking/): why pasta avoids slirp4netns's user-space NAT, how to check the active backend, and common pasta pitfalls (a `127.0.0.53` DNS loop with systemd-resolved, broken IPv6 paths, VPN interface choice).
+- [How to use pasta networking with Podman](https://oneuptime.com/blog/post/2026-03-17-use-pasta-networking-podman/view): installing `passt`, passing pasta options, port forwarding and IPv6.
+
 ## Acceptance
 
 `test/accept.sh` drives the daemon through the hook against a dummy parent and `10.254.1.0/28`. Root on a test VM only (`VM=<host>`):
