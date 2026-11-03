@@ -76,6 +76,7 @@ The container now answers on its address from any other host on the LAN.
 - **Address ranges**: each network can limit which addresses callers may claim, so lanatt stays out of your DHCP pool and away from static hosts.
 - **Access control**: a UID allowlist. A caller can only join its own containers, never the host netns. Root is trusted only with `allowRoot`.
 - **Survives restarts**: claims are stored on disk. Claims of containers that are gone are dropped.
+- **Kernel datapath**: attachments are macvlans, with no user-space forwarder like `pasta` or `slirp4netns`. See [performance](docs/usage.md#performance).
 - **Images**: `linux/amd64` and `linux/arm64` on GHCR.
 
 Field-by-field reference: [docs/usage.md](docs/usage.md).
