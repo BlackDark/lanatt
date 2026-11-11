@@ -66,7 +66,7 @@ func prepareSocketDir(socket string) error {
 func prune(s claims.State, boot string) claims.State {
 	out, dropped := s.Prune(LiveClaim(boot))
 	for _, c := range dropped {
-		log.Printf("dropped claim %s %s: %s", claims.ShortID(c.ID), c.Address, DeadReason(c, boot))
+		log.Printf("dropped claim %s %s: %s", claims.ShortID(c.ID), claims.Addresses(c), DeadReason(c, boot))
 	}
 	return out
 }

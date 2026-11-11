@@ -1,6 +1,7 @@
 package claims
 
 import (
+	"encoding/json"
 	"net/netip"
 	"path/filepath"
 	"testing"
@@ -326,6 +327,33 @@ func TestAddress6AdmittedAndRecorded(t *testing.T) {
 	}
 	if v4only.Address6.IsValid() {
 		t.Fatal("join without address6 got one")
+	}
+}
+
+func TestAddress6JSONRoundTrip(t *testing.T) {
+	c := Claim{ID: "c", Address: netip.MustParseAddr("10.254.1.2"), Address6: netip.MustParseAddr("fd00:1::2")}
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Claim
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Address6 != c.Address6 {
+		t.Fatalf("address6 %s after round trip, want %s", back.Address6, c.Address6)
+	}
+}
+
+func TestAddresses(t *testing.T) {
+	v4 := Claim{Address: netip.MustParseAddr("10.254.1.2")}
+	if got := Addresses(v4); got != "10.254.1.2" {
+		t.Errorf("IPv4 only: %q", got)
+	}
+	dual := v4
+	dual.Address6 = netip.MustParseAddr("fd00:1::2")
+	if got := Addresses(dual); got != "10.254.1.2 fd00:1::2" {
+		t.Errorf("dual: %q", got)
 	}
 }
 

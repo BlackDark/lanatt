@@ -270,6 +270,14 @@ func Holder(c Claim) string {
 	return s + ")"
 }
 
+// Addresses lists the claim's addresses: IPv4, then IPv6 when set.
+func Addresses(c Claim) string {
+	if c.Address6.IsValid() {
+		return c.Address.String() + " " + c.Address6.String()
+	}
+	return c.Address.String()
+}
+
 // ShortID is the container id as `podman ps` shows it.
 func ShortID(id string) string {
 	if len(id) > 12 {

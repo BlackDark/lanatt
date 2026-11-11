@@ -39,7 +39,7 @@ func WriteTable(w io.Writer, rows []Row, boot string) error {
 	fmt.Fprintln(tw, "ID\tUID\tNETWORK\tADDRESS\tMAC\tIFACE\tNETNS\tBOOT\tOWNER\tREASON")
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-			claims.ShortID(r.ID), r.UID, r.Network, r.Address, r.MAC, r.Interface, r.Netns,
+			claims.ShortID(r.ID), r.UID, r.Network, claims.Addresses(r.Claim), r.MAC, r.Interface, r.Netns,
 			bootLabel(r.BootID, boot), owner(r), reasonOrDash(r.Reason))
 	}
 	return tw.Flush()

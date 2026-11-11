@@ -44,6 +44,18 @@ func TestRowsJudgesEachClaim(t *testing.T) {
 	}
 }
 
+func TestTableShowsAddress6(t *testing.T) {
+	c := claim("d9bdef4dfe45", boot, 44)
+	c.Address6 = netip.MustParseAddr("fd00:1::51")
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, []Row{{Claim: c, Alive: true}}, boot); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "10.0.1.51 fd00:1::51") {
+		t.Fatalf("address6 missing:\n%s", buf.String())
+	}
+}
+
 func TestTableShowsOwnerAndReason(t *testing.T) {
 	rows := []Row{
 		{Claim: claim("a6eabd1adc12ffff", boot, 42), Alive: true, OwnerComm: "traefik"},
