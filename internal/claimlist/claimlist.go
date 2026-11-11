@@ -39,7 +39,7 @@ func WriteTable(w io.Writer, rows []Row, boot string) error {
 	fmt.Fprintln(tw, "ID\tUID\tNETWORK\tADDRESS\tMAC\tIFACE\tNETNS\tBOOT\tOWNER\tREASON")
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-			shortID(r.ID), r.UID, r.Network, r.Address, r.MAC, r.Interface, r.Netns,
+			claims.ShortID(r.ID), r.UID, r.Network, r.Address, r.MAC, r.Interface, r.Netns,
 			bootLabel(r.BootID, boot), owner(r), reasonOrDash(r.Reason))
 	}
 	return tw.Flush()
@@ -53,14 +53,6 @@ func WriteJSON(w io.Writer, rows []Row) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(rows)
-}
-
-// shortID is the id as `podman ps` shows it.
-func shortID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
 }
 
 func bootLabel(claimBoot, boot string) string {
