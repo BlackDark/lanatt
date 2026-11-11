@@ -36,7 +36,7 @@ Run the daemon (rootful, host network and pid namespace, three capabilities):
 podman run -d --name lanatt --network host --pid host \
   --cap-drop=ALL --cap-add=NET_ADMIN,SYS_ADMIN,SYS_PTRACE \
   --security-opt apparmor=unconfined --security-opt no-new-privileges --read-only \
-  -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
+  -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt \
   ghcr.io/blackdark/lanatt:latest
 ```
 
@@ -75,7 +75,7 @@ The container now answers on its address from any other host on the LAN.
 - **Routes**: lanatt adds a default route via the network gateway when the container has none. Set `"default": true` on a join to replace an existing one.
 - **Address ranges**: each network can limit which addresses callers may claim, so lanatt stays out of your DHCP pool and away from static hosts.
 - **Access control**: a UID allowlist. A caller can only join its own containers, never the host netns. Root is trusted only with `allowRoot`.
-- **Survives restarts**: claims are stored on disk. Claims of containers that are gone are dropped.
+- **Survives restarts**: claims are stored under `/run/lanatt` and dropped when their container is gone. A reboot clears them, since attachments do not survive one either.
 - **Kernel datapath**: attachments are macvlans, with no user-space forwarder like `pasta` or `slirp4netns`. See [performance](docs/usage.md#performance).
 - **Images**: `linux/amd64` and `linux/arm64` on GHCR.
 

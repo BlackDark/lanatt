@@ -1,6 +1,6 @@
 {
   "socket": "/run/lanatt/lanatt.sock",
-  "state": "/var/lib/lanatt/claims.json",
+  "state": "/run/lanatt/claims.json",
   "uids": [1000],
   "allowRoot": false,
   "networks": [

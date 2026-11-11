@@ -11,7 +11,7 @@ lanatt daemon -config /etc/lanatt/config.json
 ```json
 {
   "socket": "/run/lanatt/lanatt.sock",
-  "state": "/var/lib/lanatt/claims.json",
+  "state": "/run/lanatt/claims.json",
   "uids": [1000],
   "allowRoot": false,
   "networks": [
@@ -21,13 +21,13 @@ lanatt daemon -config /etc/lanatt/config.json
 }
 ```
 
-- `socket` and `state` default to the values above.
+- `socket` and `state` default to the values above. `state` is on tmpfs: attachments do not survive a reboot, so claims must not either.
 - `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
 - `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
 - `driver` must be `macvlan`; the device is created in bridge mode.
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
-- On start, and before each attach, claims whose netns no longer exists are dropped.
+- On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start.
 - On start, host macvlans named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
 
@@ -61,13 +61,15 @@ The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR when a r
 podman run -d --name lanatt --network host --pid host \
   --cap-drop=ALL --cap-add=NET_ADMIN,SYS_ADMIN,SYS_PTRACE \
   --security-opt apparmor=unconfined --security-opt no-new-privileges --read-only \
-  -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt -v /var/lib/lanatt:/var/lib/lanatt \
+  -v /etc/lanatt:/etc/lanatt:ro -v /run/lanatt:/run/lanatt \
   ghcr.io/blackdark/lanatt:<version>
 ```
 
 - `NET_ADMIN` creates the macvlan and configures it. `SYS_ADMIN` enters the workload netns (`setns`). `SYS_PTRACE` opens another user's `/proc/<pid>/ns/net`. Dropping any one of them breaks the join; this was checked one by one.
 - AppArmor: Podman's `containers-default` profile denies reading another process's `/proc/<pid>/ns/net` even with `SYS_PTRACE`, so the container runs unconfined. Docker applies its own `docker-default` profile; running the daemon under Docker with these flags is untested.
-- The root filesystem can be read-only: the daemon writes only to the `/run/lanatt` and `/var/lib/lanatt` mounts.
+- The root filesystem can be read-only: the daemon writes only to the `/run/lanatt` mount, which holds the socket and the state file.
+
+For a native daemon systemd unit, use `RuntimeDirectory=lanatt` and `RuntimeDirectoryPreserve=yes` instead of a mount. For Quadlet, keep `Volume=/run/lanatt:/run/lanatt` so host hooks can reach the socket. Order `lanatt.service` with `Before=user@<uid>.service` so it stops after the user manager's containers. Otherwise `hook stop` finds no daemon and its claim survives.
 
 Set `"socket": "/run/lanatt/lanatt.sock"` in the config so the socket appears on the host through the `/run/lanatt` mount.
 

@@ -192,6 +192,18 @@ unshare --net sleep 300 &
 R2=$!; PIDS+=("$R2"); sleep 0.3
 check "address clash refused for root" "! hook root create crx $R2 '$(join 10.254.1.2 02:42:0a:fe:01:13)'"
 
+# 15. A claim whose owner died is dropped even when another process still holds its netns
+# inode; a new workload on the same address must join. lab2 hands out .17-.20.
+netns "$U"; L=$NSPID
+check "stale owner joins" "hook $U create cl $L '[{\"network\":\"lab2\",\"address\":\"10.254.1.20\",\"mac\":\"02:42:0a:fe:01:20\"}]'"
+nsenter -t "$L" --net sleep 300 &
+HOLD=$!; PIDS+=("$HOLD"); sleep 0.3
+kill "$L"; sleep 0.3
+check "inode still held after owner exit" "readlink /proc/$HOLD/ns/net >/dev/null"
+netns "$U"; M=$NSPID
+check "new workload gets the stale address" "hook $U create cm $M '[{\"network\":\"lab2\",\"address\":\"10.254.1.20\",\"mac\":\"02:42:0a:fe:01:21\"}]'"
+check "new workload has the address" "in_ns $M -4 -br addr show lan0 | grep -q 10.254.1.20/28"
+
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"
 echo "$pass passed, $fail failed"
