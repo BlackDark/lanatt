@@ -5,16 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"lanatt/internal/claims"
 )
 
 // target is the workload netns, held open so a reused pid cannot redirect the join.
 type target struct {
 	ns    *os.File
 	netns uint64
+	start string
 }
 
 // openTarget refuses a pid that sits in the daemon's netns, or that the caller does not own
@@ -36,6 +38,7 @@ func openTarget(uid uint32, pid int, anyOwner bool) (target, error) {
 		ns.Close()
 		return target{}, err
 	}
+	t.start = before
 	return t, nil
 }
 
@@ -128,17 +131,49 @@ func startTime(pid int) (string, error) {
 	return fields[19], nil
 }
 
-// liveNetns is the inode of every netns some process is in.
-func liveNetns() (map[uint64]bool, error) {
-	paths, err := filepath.Glob("/proc/[0-9]*/ns/net")
+// bootID identifies this boot; a claim from another boot cannot be live.
+func bootID() (string, error) {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	return strings.TrimSpace(string(data)), err
+}
+
+// deadReason says why c is not held by a live workload, or "" when it is.
+func deadReason(c claims.Claim, boot string) string {
+	if c.OwnerPid == 0 || c.OwnerStart == "" {
+		return "no owner recorded"
+	}
+	if c.BootID != boot {
+		return "other boot"
+	}
+	start, err := startTime(c.OwnerPid)
 	if err != nil {
-		return nil, err
+		return "owner gone"
 	}
-	alive := map[uint64]bool{}
-	for _, p := range paths {
-		if id, err := nsID(p); err == nil {
-			alive[id.ino] = true
-		}
+	if start != c.OwnerStart {
+		return "owner pid reused"
 	}
-	return alive, nil
+	// Open first, then recheck the start time: the inode must belong to the same process.
+	ns, err := os.Open(fmt.Sprintf("/proc/%d/ns/net", c.OwnerPid))
+	if err != nil {
+		return "owner gone"
+	}
+	defer ns.Close()
+	id, err := fileNsID(ns)
+	if err != nil {
+		return "owner gone"
+	}
+	if after, err := startTime(c.OwnerPid); err != nil {
+		return "owner gone"
+	} else if after != start {
+		return "owner pid reused"
+	}
+	if id.ino != c.Netns {
+		return "netns changed"
+	}
+	return ""
+}
+
+// liveClaim keeps the claims deadReason does not reject.
+func liveClaim(boot string) func(claims.Claim) bool {
+	return func(c claims.Claim) bool { return deadReason(c, boot) == "" }
 }

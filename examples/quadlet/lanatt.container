@@ -17,10 +17,9 @@ NoNewPrivileges=true
 ReadOnly=true
 Volume=/etc/lanatt:/etc/lanatt:ro
 Volume=/run/lanatt:/run/lanatt
-Volume=/var/lib/lanatt:/var/lib/lanatt
 
 [Service]
-ExecStartPre=/usr/bin/mkdir -p /run/lanatt /var/lib/lanatt
+ExecStartPre=/usr/bin/mkdir -p /run/lanatt
 Restart=on-failure
 
 [Install]

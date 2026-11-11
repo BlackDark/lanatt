@@ -100,7 +100,7 @@ up() {
     "$NGINX" >/dev/null
   show "$(docker inspect -f '{{.State.Pid}}' web-rootful)" "rootful docker"
 
-  echo "--- claims"; cat /var/lib/lanatt/claims.json
+  echo "--- claims"; cat /run/lanatt/claims.json
 }
 
 down() {
@@ -111,8 +111,8 @@ down() {
     as_user docker compose -p lanatt down -t 2 >/dev/null 2>&1 || true
     as_user systemctl --user stop web-quadlet 2>/dev/null || true
     as_user podman rm -f -t 2 web >/dev/null 2>&1 || true
-    echo "--- claims after stop"; cat /var/lib/lanatt/claims.json 2>/dev/null || true
-    if [[ -f /var/lib/lanatt/claims.json ]] && grep -q '"address"' /var/lib/lanatt/claims.json; then
+    echo "--- claims after stop"; cat /run/lanatt/claims.json 2>/dev/null || true
+    if [[ -f /run/lanatt/claims.json ]] && grep -q '"address"' /run/lanatt/claims.json; then
       echo "FAIL: claims left after every container stopped" >&2
       leftover=1
     fi
@@ -128,7 +128,7 @@ down() {
   systemctl daemon-reload
   systemctl restart docker 2>/dev/null || true
   podman rmi -f "$IMAGE" >/dev/null 2>&1 || true
-  rm -rf /etc/lanatt /run/lanatt /var/lib/lanatt /etc/containers/oci /etc/containers/containers.conf.d \
+  rm -rf /etc/lanatt /run/lanatt /etc/containers/oci /etc/containers/containers.conf.d \
     /usr/local/bin/lanatt /usr/local/bin/lanatt-runc /usr/local/bin/lanatt-crun "$DBIN"
   [[ -z ${leftover:-} ]]
 }

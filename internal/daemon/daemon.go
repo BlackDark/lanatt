@@ -21,6 +21,7 @@ import (
 // Server serialises every request; one request at a time touches claims and the kernel.
 type Server struct {
 	cfg   config.Config
+	boot  string
 	mu    sync.Mutex
 	state claims.State
 	conns chan struct{}
@@ -31,29 +32,38 @@ const (
 	maxConns   = 32
 )
 
-// New reaps leftover temporary devices, loads stored claims, and drops those whose netns is gone.
+// New reaps leftover temporary devices, loads stored claims, and drops those no live workload holds.
 func New(cfg config.Config) (*Server, error) {
 	if err := reapTemps(); err != nil {
 		return nil, fmt.Errorf("reap temporary devices: %w", err)
+	}
+	if err := prepareSocketDir(cfg.Socket); err != nil {
+		return nil, err
 	}
 	st, err := claims.Load(cfg.State)
 	if err != nil {
 		return nil, err
 	}
-	alive, err := liveNetns()
+	boot, err := bootID()
 	if err != nil {
 		return nil, err
 	}
-	st = st.Prune(alive)
+	st = st.Prune(liveClaim(boot))
 	if err := claims.Save(cfg.State, st); err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg, state: st, conns: make(chan struct{}, maxConns)}, nil
+	return &Server{cfg: cfg, boot: boot, state: st, conns: make(chan struct{}, maxConns)}, nil
+}
+
+// prepareSocketDir makes the socket's directory traversable. Rootless hooks must reach the
+// socket through it; it must exist before the state file, or Save would create it 0700.
+func prepareSocketDir(socket string) error {
+	return os.MkdirAll(filepath.Dir(socket), 0o755)
 }
 
 // Listen opens the socket. Any local user may connect; peer credentials decide.
 func (s *Server) Listen() (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(s.cfg.Socket), 0o755); err != nil {
+	if err := prepareSocketDir(s.cfg.Socket); err != nil {
 		return nil, err
 	}
 	if err := os.Remove(s.cfg.Socket); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -142,17 +152,14 @@ func (s *Server) attach(uid uint32, req wire.Request) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A netns inode can be reused, so a dead workload's claim must not look like this one's.
-	alive, err := liveNetns()
-	if err != nil {
-		return err
-	}
-	if err := s.commit(s.state.Prune(alive)); err != nil {
+	if err := s.commit(s.state.Prune(liveClaim(s.boot))); err != nil {
 		return err
 	}
 	plans, err := claims.Plan(s.state, s.cfg.Networks, uid, req.ID, t.netns, req.Joins)
 	if err != nil {
 		return err
 	}
+	plans = claims.Own(plans, claims.Owner{BootID: s.boot, Pid: req.Pid, Start: t.start})
 	for i, p := range plans {
 		if p.Existing {
 			continue

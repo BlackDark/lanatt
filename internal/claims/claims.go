@@ -15,6 +15,8 @@ import (
 )
 
 // Claim is one attachment the daemon has made. Netns inode plus network is its identity.
+// The owner fields name the process that asked for it; the claim lives only while that
+// process still exists in the same netns, in the same boot.
 type Claim struct {
 	ID        string     `json:"id"`
 	UID       uint32     `json:"uid"`
@@ -23,6 +25,17 @@ type Claim struct {
 	Address   netip.Addr `json:"address"`
 	MAC       string     `json:"mac"`
 	Interface string     `json:"interface"`
+	BootID    string     `json:"boot_id"`
+	OwnerPid  int        `json:"owner_pid"`
+	// OwnerStart is the owner's start time, so a reused pid does not own the claim.
+	OwnerStart string `json:"owner_start"`
+}
+
+// Owner is the process and boot a new claim is made under.
+type Owner struct {
+	BootID string
+	Pid    int
+	Start  string
 }
 
 // State is every live claim.
@@ -155,6 +168,18 @@ func nextName(used map[string]bool) string {
 	}
 }
 
+// Own stamps the new claims in plans with the process that asked for them.
+func Own(plans []Planned, o Owner) []Planned {
+	for i := range plans {
+		if !plans[i].Existing {
+			plans[i].BootID = o.BootID
+			plans[i].OwnerPid = o.Pid
+			plans[i].OwnerStart = o.Start
+		}
+	}
+	return plans
+}
+
 // Add records the new claims among plans.
 func (s State) Add(plans []Planned) State {
 	out := State{Claims: append([]Claim(nil), s.Claims...)}
@@ -171,9 +196,9 @@ func (s State) Drop(uid uint32, id string) State {
 	return s.keep(func(c Claim) bool { return c.ID != id || c.UID != uid })
 }
 
-// Prune removes claims whose netns is no longer alive.
-func (s State) Prune(alive map[uint64]bool) State {
-	return s.keep(func(c Claim) bool { return alive[c.Netns] })
+// Prune removes claims that alive rejects.
+func (s State) Prune(alive func(Claim) bool) State {
+	return s.keep(alive)
 }
 
 func (s State) keep(f func(Claim) bool) State {

@@ -127,7 +127,7 @@ func TestDropAndPrune(t *testing.T) {
 	if got := s.Drop(1001, "c"); len(got.Claims) != 2 {
 		t.Errorf("another uid dropped a claim: %+v", got)
 	}
-	if got := s.Prune(map[uint64]bool{1: true}); len(got.Claims) != 1 || got.Claims[0].ID != "c" {
+	if got := s.Prune(func(c Claim) bool { return c.ID == "c" }); len(got.Claims) != 1 || got.Claims[0].ID != "c" {
 		t.Errorf("prune: %+v", got)
 	}
 	if _, err := Plan(s.Drop(1000, "c"), nets(t), 1000, "e", 3, []wire.Join{j1}); err != nil {
@@ -181,5 +181,25 @@ func TestOutsideRangesRefused(t *testing.T) {
 	}
 	if _, err := Plan(State{}, cfg.Networks, 1000, "c", 1, []wire.Join{{Network: "a", Address: "10.254.1.3", MAC: "02:00:00:00:00:03"}}); err != nil {
 		t.Errorf("address inside ranges refused: %v", err)
+	}
+}
+
+func TestOwnStampsOnlyNewClaims(t *testing.T) {
+	owner := Owner{BootID: "boot", Pid: 42, Start: "777"}
+	s := admit(t, State{}, "c", 1, j1)
+	plans, err := Plan(s, nets(t), 1000, "c", 1, []wire.Join{j1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Own(plans, owner)[0]; got.OwnerPid != 0 {
+		t.Errorf("existing claim restamped: %+v", got)
+	}
+	plans, err = Plan(State{}, nets(t), 1000, "d", 2, []wire.Join{{Network: "b", Address: "10.254.2.2", MAC: "02:00:00:00:00:04"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Own(plans, owner)[0].Claim
+	if c.BootID != "boot" || c.OwnerPid != 42 || c.OwnerStart != "777" {
+		t.Errorf("new claim not owned: %+v", c)
 	}
 }
