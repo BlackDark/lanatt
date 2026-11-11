@@ -63,3 +63,19 @@ func TestIPv6SysctlsPerNetwork(t *testing.T) {
 		t.Errorf("dual-stack: %v", got)
 	}
 }
+
+func TestDADState(t *testing.T) {
+	addr := netip.MustParseAddr("2001:db8:77::20")
+	cases := map[string]struct{ out, want string }{
+		"preferred":  {"    inet6 2001:db8:77::20/64 scope global \n       valid_lft forever preferred_lft forever\n", ""},
+		"tentative":  {"    inet6 2001:db8:77::20/64 scope global tentative \n", "tentative"},
+		"dadfailed":  {"    inet6 2001:db8:77::20/64 scope global dadfailed tentative \n", "dadfailed"},
+		"other addr": {"    inet6 2001:db8:77::21/64 scope global dadfailed \n", "missing"},
+		"no output":  {"", "missing"},
+	}
+	for name, c := range cases {
+		if got := dadState(c.out, addr); got != c.want {
+			t.Errorf("%s: got %q want %q", name, got, c.want)
+		}
+	}
+}

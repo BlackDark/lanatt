@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"lanatt/internal/claims"
 	"lanatt/internal/config"
@@ -128,6 +130,9 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 		if _, err := inNetns(ns, "addr", "add", addr6, "dev", p.Interface); err != nil {
 			return err
 		}
+		if err := waitDAD(ns, p.Interface, p.Address6); err != nil {
+			return err
+		}
 	}
 	out, err := inNetns(ns, "-4", "route", "show", "default")
 	if err != nil {
@@ -150,6 +155,54 @@ func ipv6Sysctls(n config.Network) [][2]string {
 		return [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
 	}
 	return [][2]string{{"disable_ipv6", "1"}}
+}
+
+// dadTimeout bounds how long a join waits for duplicate address detection to finish.
+const dadTimeout = 5 * time.Second
+
+// waitDAD waits until addr is preferred. A duplicate on the LAN fails the join: the caller
+// deletes the device, and no claim is written.
+func waitDAD(ns *os.File, iface string, addr netip.Addr) error {
+	deadline := time.Now().Add(dadTimeout)
+	for {
+		out, err := inNetns(ns, "-6", "addr", "show", "dev", iface)
+		if err != nil {
+			return err
+		}
+		switch state := dadState(out, addr); state {
+		case "":
+			return nil
+		case "dadfailed":
+			return fmt.Errorf("address6 %s is already in use on the LAN", addr)
+		case "missing":
+			return fmt.Errorf("address6 %s is not on %s", addr, iface)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("address6 %s still tentative after %s", addr, dadTimeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// dadState reads addr's flags from `ip -6 addr show` output: "dadfailed", "tentative",
+// "missing", or "" once it is preferred.
+func dadState(out string, addr netip.Addr) string {
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || f[0] != "inet6" || !strings.HasPrefix(f[1], addr.String()+"/") {
+			continue
+		}
+		for _, flag := range f {
+			if flag == "dadfailed" {
+				return "dadfailed"
+			}
+			if flag == "tentative" {
+				return "tentative"
+			}
+		}
+		return ""
+	}
+	return "missing"
 }
 
 // setIPv6 writes one net.ipv6.conf.<iface> sysctl inside the netns. ip(8) cannot set sysctls,
