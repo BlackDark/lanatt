@@ -46,6 +46,7 @@ cat >"$CFG" <<EOF
 {"socket":"$SOCK","state":"$STATE","uids":[$(id -u "$U")],
  "networks":[{"name":"lab","parent":"$PARENT","prefix":"10.254.1.0/28","gateway":"$GW","driver":"macvlan"},
   {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]},
+  {"name":"lab6","parent":"$PARENT","prefix":"10.254.1.48/28","gateway":"10.254.1.62","driver":"macvlan","prefix6":"fd77:254::/64","gateway6":"fd77:254::1"},
   {"name":"vl","parent":"$PARENT2","prefix":"10.254.1.32/28","gateway":"10.254.1.46","driver":"ipvlan"}]}
 EOF
 
@@ -230,6 +231,26 @@ netns "$U"; V2=$NSPID
 check "second ipvlan netns on the same parent joins" "hook $U create cv2 $V2 '[{\"network\":\"vl\",\"address\":\"10.254.1.34\"}]'"
 netns "$U"; V3=$NSPID
 check "ipvlan join with a MAC refused" "! hook $U create cv3 $V3 '[{\"network\":\"vl\",\"address\":\"10.254.1.35\",\"mac\":\"02:42:0a:fe:01:35\"}]'"
+
+# 18. IPv6 (ADR-0012): static ULA address, no SLAAC, v6 default via gateway6, DAD refusal.
+netns "$U"; S1=$NSPID
+check "dual-stack join" "hook $U create cs1 $S1 '[{\"network\":\"lab6\",\"address\":\"10.254.1.50\",\"mac\":\"02:42:0a:fe:01:50\",\"address6\":\"fd77:254::50\"}]'"
+check "accept_ra is 0 in the netns" "[[ \$(nsenter -t $S1 --net cat /proc/sys/net/ipv6/conf/lan0/accept_ra) == 0 ]]"
+check "one static v6 address, no SLAAC" "[[ \$(in_ns $S1 -6 -br addr show dev lan0 scope global | grep -c fd77) -eq 1 ]]"
+check "v6 default via gateway6" "in_ns $S1 -6 route show default | grep -q 'via fd77:254::1 dev lan0'"
+check "v4 default still via gateway" "in_ns $S1 -4 route show default | grep -q 'via 10.254.1.62 dev lan0'"
+netns "$U"; S2=$NSPID
+ip link add dupv link "$PARENT" type macvlan mode bridge
+ip link set dupv netns "$S2"
+in_ns $S2 link set dupv name dupv0
+in_ns $S2 addr add fd77:254::51/64 dev dupv0
+in_ns $S2 link set dupv0 up
+sleep 2
+netns "$U"; S3=$NSPID
+check "duplicate address6 on the LAN refused by DAD" "! hook $U create cs3 $S3 '[{\"network\":\"lab6\",\"address\":\"10.254.1.51\",\"mac\":\"02:42:0a:fe:01:51\",\"address6\":\"fd77:254::51\"}]'"
+check "refusal names the DAD duplicate" "grep -q 'address6 fd77:254::51 is already in use on the LAN' '$WORK/hook.err'"
+check "DAD refusal leaves no device in the netns" "[[ \$(in_ns $S3 -br link show | grep -c lan0) -eq 0 ]]"
+check "DAD refusal writes no claim" "! grep -q 'fd77:254::51' '$STATE'"
 
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"
