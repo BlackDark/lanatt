@@ -9,7 +9,7 @@ The reasons are measured, not guessed. On a dual-stack LAN a fresh netns has `ac
 - **Opt-in.** `prefix6` is the switch. No boolean `ipv6` flag, so there is no invalid combination to check. Without `prefix6`, `gateway6` and `allowGlobal6` are errors.
 - **ULA by default.** `prefix6` must be a `/48` to `/64` inside `fd00::/8`. `allowGlobal6: true` admits any other unicast prefix. Link-local, multicast, loopback and unspecified prefixes are refused either way.
 - **Static addresses.** `address6` per join, in `prefix6`, not the subnet-router address and not the gateway. Clash rules match IPv4: an address or MAC held by another netns on the network is refused.
-- **Attachment sysctls.** Networks with `prefix6` set `accept_ra=0` and `autoconf=0` before the link comes up, so no RA is ever processed. Networks without it write nothing: IPv4 joins do not need a writable `/proc/sys`. Known gap: their attachments keep host SLAAC on a dual-stack LAN. Follow-up: a per-network opt-out.
+- **Attachment sysctls.** Networks with `prefix6` set `accept_ra=0`, `autoconf=0`, `accept_dad=1` and `dad_transmits=1` before the link comes up, so no RA is processed and DAD runs even if the caller's netns disabled it. Networks without it write nothing: IPv4 joins do not need a writable `/proc/sys`. Known gap: their attachments keep host SLAAC on a dual-stack LAN. Follow-up: a per-network opt-out.
 - **Container.** The daemon's `/proc/sys` is read-only by default. `prefix6` needs `--security-opt unmask=/proc/sys` (verified on the VM: the write fails without it).
 - **DAD.** After `addr add`, lanatt waits until the address is preferred. `dadfailed` refuses the join: the device is deleted and no claim is written.
 - **Routes per family** (ADR-0005). A v6 default needs `gateway6` and the attachment's `address6`. `default: true` replaces the default in each family the attachment serves.
@@ -19,6 +19,7 @@ The reasons are measured, not guessed. On a dual-stack LAN a fresh netns has `ac
 
 - ULA addresses reach the LAN only. The workload has no internet over IPv6 unless the router routes ULA through NAT66, which is the router's job.
 - No DNS over IPv6 from the attachment: `accept_ra=0` drops RDNSS, and DHCPv6 is not implemented (#20).
+- A parent MTU below 1280 has no IPv6 at all. A `prefix6` join is refused; IPv4-only joins are unaffected.
 - The RA-learned MTU (1492 measured on the test LAN) does not apply to static routes. The link keeps its parent MTU (1500). Off-link traffic could hit a smaller path MTU.
 
 ## Verified

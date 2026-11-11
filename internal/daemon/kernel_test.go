@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,8 +59,8 @@ func TestIPv6SysctlsPerNetwork(t *testing.T) {
 		t.Errorf("IPv4-only: %v", got)
 	}
 	dual := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64")}
-	want := [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
-	if got := ipv6Sysctls(dual); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+	want := [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"}}
+	if got := ipv6Sysctls(dual); !slices.Equal(got, want) {
 		t.Errorf("dual-stack: %v", got)
 	}
 }

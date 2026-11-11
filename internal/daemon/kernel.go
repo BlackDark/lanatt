@@ -162,11 +162,16 @@ func setDefault(ns *os.File, family string, gw netip.Addr, dev string, wantDefau
 }
 
 // ipv6Sysctls are the net.ipv6.conf.<iface> settings for a new attachment. A network with
-// prefix6 takes only the static addresses lanatt adds (ADR-0012). Others write nothing: the
-// daemon's /proc/sys is read-only by default, and IPv4 joins must not depend on it.
+// prefix6 takes only the static addresses lanatt adds (ADR-0012). DAD is forced on: the
+// caller's netns may have turned it off, and waitDAD would then trust an unprobed address.
+// Others write nothing: the daemon's /proc/sys is read-only by default, and IPv4 joins must
+// not depend on it.
 func ipv6Sysctls(n config.Network) [][2]string {
 	if n.HasIPv6() {
-		return [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
+		return [][2]string{
+			{"accept_ra", "0"}, {"autoconf", "0"},
+			{"accept_dad", "1"}, {"dad_transmits", "1"},
+		}
 	}
 	return nil
 }
@@ -192,7 +197,7 @@ func waitDAD(ns *os.File, iface string, addr netip.Addr) error {
 			return fmt.Errorf("address6 %s is not on %s", addr, iface)
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("address6 %s still tentative after %s", addr, dadTimeout)
+			return fmt.Errorf("address6 %s still tentative after %s: is the parent link up?", addr, dadTimeout)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

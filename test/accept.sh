@@ -234,7 +234,8 @@ check "ipvlan join with a MAC refused" "! hook $U create cv3 $V3 '[{\"network\":
 netns "$U"; S1=$NSPID
 check "dual-stack join" "hook $U create cs1 $S1 '[{\"network\":\"lab6\",\"address\":\"10.254.1.50\",\"mac\":\"02:42:0a:fe:01:50\",\"address6\":\"fd77:254::50\"}]'"
 check "accept_ra is 0 in the netns" "[[ \$(nsenter -t $S1 --net cat /proc/sys/net/ipv6/conf/lan0/accept_ra) == 0 ]]"
-check "one static v6 address, no SLAAC" "[[ \$(in_ns $S1 -6 -br addr show dev lan0 scope global | grep -c fd77) -eq 1 ]]"
+check "accept_dad is 1 in the netns" "[[ \$(nsenter -t $S1 --net cat /proc/sys/net/ipv6/conf/lan0/accept_dad) == 1 ]]"
+check "the only global v6 address is the static one" "[[ \$(in_ns $S1 -6 -o addr show dev lan0 scope global | awk '{print \$4}') == fd77:254::50/64 ]]"
 check "v6 default via gateway6" "in_ns $S1 -6 route show default | grep -q 'via fd77:254::1 dev lan0'"
 check "v4 default still via gateway" "in_ns $S1 -4 route show default | grep -q 'via 10.254.1.62 dev lan0'"
 netns "$U"; S2=$NSPID
