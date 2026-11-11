@@ -110,6 +110,7 @@ check "retry adds no interface" "[[ \$(in_ns $A -br link show type macvlan | wc 
 # 3. A second netns with the same address is refused.
 netns "$U"; B=$NSPID
 check "same address from another netns refused" "! hook $U create cb $B '$(join 10.254.1.2 02:42:0a:fe:01:03)'"
+check "refusal names the holder" "grep -q 'address 10.254.1.2 is taken by claim' '$WORK/hook.err'"
 check "same MAC from another netns refused" "! hook $U create cb $B '$(join 10.254.1.3 02:42:0a:fe:01:02)'"
 check "refused netns has no attachment" "! in_ns $B link show lan0 >/dev/null 2>&1"
 check "no macvlan left on host" "! ip -br link show type macvlan | grep -q ."
@@ -171,6 +172,7 @@ kill "$C"; sleep 0.3
 start_daemon
 check "claim survives restart" "! hook $U create cf $F '$(join 10.254.1.5 02:42:0a:fe:01:09)'"
 check "dead netns claim dropped" "hook $U create cf $F '$(join 10.254.1.4 02:42:0a:fe:01:04)'"
+check "startup logs the dropped claim" "grep -q 'claims: .* loaded' '$WORK/daemon.log' && grep -q 'dropped claim .* 10.254.1.4: owner gone' '$WORK/daemon.log'"
 
 # 14. Root callers: refused unless allowRoot; then any pid's netns, never the host netns.
 unshare --net sleep 300 &

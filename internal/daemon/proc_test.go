@@ -50,7 +50,7 @@ func TestLiveClaimPrunes(t *testing.T) {
 	drop := keep
 	drop.OwnerStart = "0"
 	s := claims.State{Claims: []claims.Claim{keep, drop}}
-	got := s.Prune(LiveClaim("boot"))
+	got, _ := s.Prune(LiveClaim("boot"))
 	if len(got.Claims) != 1 || got.Claims[0] != keep {
 		t.Fatalf("prune kept %+v", got.Claims)
 	}

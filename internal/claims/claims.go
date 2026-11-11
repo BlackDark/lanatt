@@ -136,10 +136,10 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 			return Planned{Claim: c, Default: j.Default, Existing: true}, nil
 		}
 		if c.Address == addr {
-			return Planned{}, fmt.Errorf("address %s is taken", addr)
+			return Planned{}, fmt.Errorf("address %s is taken by %s", addr, Holder(c))
 		}
 		if c.MAC == mac {
-			return Planned{}, fmt.Errorf("MAC %s is taken", mac)
+			return Planned{}, fmt.Errorf("MAC %s is taken by %s", mac, Holder(c))
 		}
 	}
 	return Planned{Claim: want, Default: j.Default}, nil
@@ -193,22 +193,44 @@ func (s State) Add(plans []Planned) State {
 
 // Drop removes every claim uid made for container id.
 func (s State) Drop(uid uint32, id string) State {
-	return s.keep(func(c Claim) bool { return c.ID != id || c.UID != uid })
-}
-
-// Prune removes claims that alive rejects.
-func (s State) Prune(alive func(Claim) bool) State {
-	return s.keep(alive)
-}
-
-func (s State) keep(f func(Claim) bool) State {
 	out := State{Claims: []Claim{}}
 	for _, c := range s.Claims {
-		if f(c) {
+		if c.ID != id || c.UID != uid {
 			out.Claims = append(out.Claims, c)
 		}
 	}
 	return out
+}
+
+// Prune removes claims that alive rejects and returns them.
+func (s State) Prune(alive func(Claim) bool) (State, []Claim) {
+	out := State{Claims: []Claim{}}
+	var dropped []Claim
+	for _, c := range s.Claims {
+		if alive(c) {
+			out.Claims = append(out.Claims, c)
+		} else {
+			dropped = append(dropped, c)
+		}
+	}
+	return out, dropped
+}
+
+// Holder names a claim in a refusal, so the caller can find what holds the address.
+func Holder(c Claim) string {
+	s := fmt.Sprintf("claim %s (uid %d, netns %d, %s", ShortID(c.ID), c.UID, c.Netns, c.Interface)
+	if c.OwnerPid > 0 {
+		s += fmt.Sprintf(", pid %d", c.OwnerPid)
+	}
+	return s + ")"
+}
+
+// ShortID is the container id as `podman ps` shows it.
+func ShortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 // Load reads the state file. A missing file is an empty state.
