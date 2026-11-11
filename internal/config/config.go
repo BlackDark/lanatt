@@ -74,8 +74,11 @@ func (c Config) Allowed(uid uint32) bool {
 	return c.UIDs[uid] || (uid == 0 && c.AllowRoot)
 }
 
-// ValidInterfaceName reports whether name is a safe Linux interface name.
-func ValidInterfaceName(name string) bool { return ifaceName.MatchString(name) }
+// ValidInterfaceName reports whether name is a safe Linux interface name. "all" and "default"
+// are not devices: their net.ipv6.conf entries set every interface in the netns.
+func ValidInterfaceName(name string) bool {
+	return ifaceName.MatchString(name) && name != "all" && name != "default"
+}
 
 // Load reads and validates the config file at path.
 func Load(path string) (Config, error) {

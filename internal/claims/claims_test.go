@@ -42,6 +42,8 @@ func TestPlanRefusesBadJoins(t *testing.T) {
 		"zero MAC":        {Network: "a", Address: "10.254.1.2", MAC: "00:00:00:00:00:00"},
 		"bad MAC":         {Network: "a", Address: "10.254.1.2", MAC: "nope"},
 		"bad interface":   {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Interface: "a/b"},
+		"all interface":   {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Interface: "all"},
+		"default iface":   {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Interface: "default"},
 	}
 	for name, j := range cases {
 		if _, err := Plan(State{}, nets(t), 1000, "c", 1, []wire.Join{j}); err == nil {
