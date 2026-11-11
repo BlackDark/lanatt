@@ -39,15 +39,15 @@ func DecideRoute(hasDefault, wantDefault bool) RouteAction {
 	}
 }
 
-// TempName is the host-side name a macvlan has until it is moved into the netns.
+// TempName is the host-side name a device has until it is moved into the netns.
 func TempName(netns uint64, i int) string {
 	return fmt.Sprintf("lt%08x%d", uint32(netns), i)
 }
 
 var tempName = regexp.MustCompile(`^lt[0-9a-f]{8}[0-9]+$`)
 
-// StaleTemps picks lanatt's temporary devices out of `ip -o link show type macvlan`.
-// On the host, any such device was left by a crash between create and move.
+// StaleTemps picks lanatt's temporary devices out of `ip -o link show`. On the host, any such
+// device was left by a crash between create and move.
 func StaleTemps(out string) []string {
 	var names []string
 	for _, line := range strings.Split(out, "\n") {
@@ -63,9 +63,9 @@ func StaleTemps(out string) []string {
 	return names
 }
 
-// reapTemps deletes temporary macvlans a crashed daemon left on the host.
+// reapTemps deletes temporary devices a crashed daemon left on the host, of any driver.
 func reapTemps() error {
-	out, err := run(nil, ipBin, "-o", "link", "show", "type", "macvlan")
+	out, err := run(nil, ipBin, "-o", "link", "show")
 	if err != nil {
 		return err
 	}
@@ -77,10 +77,9 @@ func reapTemps() error {
 	return nil
 }
 
-// join creates the macvlan on the host, moves it into the netns, and configures it there.
+// join creates the device on the host, moves it into the netns, and configures it there.
 func join(ns *os.File, n config.Network, p claims.Planned, tmp string) error {
-	if _, err := run(nil, ipBin, "link", "add", "link", n.Parent, "name", tmp,
-		"address", p.MAC, "type", n.Driver, "mode", "bridge"); err != nil {
+	if _, err := run(nil, ipBin, linkAddArgs(n, p, tmp)...); err != nil {
 		return err
 	}
 	if _, err := run(ns, ipBin, "link", "set", "dev", tmp, "netns", nsPath); err != nil {
@@ -93,6 +92,16 @@ func join(ns *os.File, n config.Network, p claims.Planned, tmp string) error {
 		_, _ = inNetns(ns, "link", "del", "dev", name)
 	}
 	return err
+}
+
+// linkAddArgs builds `ip link add` for the network's driver. Macvlan takes the MAC and runs in
+// bridge mode; ipvlan takes no MAC and runs in L2 mode (ADR-0011).
+func linkAddArgs(n config.Network, p claims.Planned, tmp string) []string {
+	args := []string{"link", "add", "link", n.Parent, "name", tmp}
+	if n.Driver == config.DriverIPvlan {
+		return append(args, "type", "ipvlan", "mode", "l2")
+	}
+	return append(args, "address", p.MAC, "type", "macvlan", "mode", "bridge")
 }
 
 // configure sets *name to the device's current name so a failure deletes only our device.

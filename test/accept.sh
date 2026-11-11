@@ -8,6 +8,7 @@ SOCK=$WORK/lanatt.sock
 STATE=$WORK/claims.json
 CFG=$WORK/config.json
 PARENT=latparent
+PARENT2=latparent2 # ipvlan cannot share a parent with macvlan
 U=lanattu
 X=lanattx
 GW=10.254.1.14
@@ -24,6 +25,7 @@ cleanup() {
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   [[ -n "$DAEMON" ]] && kill "$DAEMON" 2>/dev/null && wait "$DAEMON" 2>/dev/null
   ip link del "$PARENT" 2>/dev/null || true
+  ip link del "$PARENT2" 2>/dev/null || true
   rm -rf "$WORK"
   for u in "$U" "$X"; do
     if id "$u" >/dev/null 2>&1; then userdel -r "$u" >/dev/null 2>&1 || userdel "$u" >/dev/null 2>&1 || true; fi
@@ -37,11 +39,14 @@ mkdir -p "$WORK"
 chmod 755 "$WORK"
 ip link add "$PARENT" type dummy
 ip link set "$PARENT" up
+ip link add "$PARENT2" type dummy
+ip link set "$PARENT2" up
 
 cat >"$CFG" <<EOF
 {"socket":"$SOCK","state":"$STATE","uids":[$(id -u "$U")],
  "networks":[{"name":"lab","parent":"$PARENT","prefix":"10.254.1.0/28","gateway":"$GW","driver":"macvlan"},
-  {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]}]}
+  {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]},
+  {"name":"vl","parent":"$PARENT2","prefix":"10.254.1.32/28","gateway":"10.254.1.46","driver":"ipvlan"}]}
 EOF
 
 start_daemon() {
@@ -215,6 +220,15 @@ check "claims -json marks it alive" "$BIN claims -config $CFG -json | grep -q '\
 kill "$Q"; sleep 0.3
 check "claims shows owner none with reason" "$BIN claims -config $CFG | grep -E '10\.254\.1\.17 .* none .* owner gone\$'"
 check "claims leaves the state file unchanged" "cmp -s '$STATE' '$WORK/state.before'"
+
+# 17. ipvlan: attachments share the parent MAC, so no MAC is taken or required.
+netns "$U"; V1=$NSPID
+check "ipvlan join without MAC" "hook $U create cv1 $V1 '[{\"network\":\"vl\",\"address\":\"10.254.1.33\"}]'"
+check "ipvlan device in netns" "in_ns $V1 -d link show lan0 | grep -q 'ipvlan'"
+netns "$U"; V2=$NSPID
+check "second ipvlan netns on the same parent joins" "hook $U create cv2 $V2 '[{\"network\":\"vl\",\"address\":\"10.254.1.34\"}]'"
+netns "$U"; V3=$NSPID
+check "ipvlan join with a MAC refused" "! hook $U create cv3 $V3 '[{\"network\":\"vl\",\"address\":\"10.254.1.35\",\"mac\":\"02:42:0a:fe:01:35\"}]'"
 
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"

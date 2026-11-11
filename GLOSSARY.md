@@ -9,7 +9,7 @@ A named LAN an administrator offers to callers. It has a prefix and a gateway. C
 _Avoid_: subnet, VLAN
 
 **Attachment**:
-One workload netns joined to one network, with one IPv4 host address in that prefix and one MAC address. The same join with the same address is the same attachment. A different address, or an address or MAC another attachment on that network already has, is refused.
+One workload netns joined to one network, with one IPv4 host address in that prefix and, on macvlan, one MAC address. The same join with the same address is the same attachment. A different address, or an address or MAC another attachment on that network already has, is refused. ipvlan attachments have no MAC.
 _Avoid_: IP, request, interface
 
 **Workload netns**:
