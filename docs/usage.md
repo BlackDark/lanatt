@@ -28,7 +28,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - `prefix6` (optional) turns on IPv6 for the network. It must be a `/48` to `/64` inside `fd00::/8` (ULA). A global prefix needs `allowGlobal6: true`. `gateway6` (optional) must be a host address in `prefix6`. Without `prefix6`, `gateway6` and `allowGlobal6` are refused. See ADR-0012.
-- Attachments on a network with `prefix6` take only the addresses lanatt adds: no SLAAC, no RA routes. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them (known gap).
+- Attachments on a network with `prefix6` get the static `address6` lanatt adds and no RA-derived addresses or routes, also when the join omits `address6`. Each still has an automatic IPv6 link-local address (`fe80::`), which lanatt does not manage. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them (known gap).
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
 - On start, host devices named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
@@ -52,7 +52,7 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 ```
 
 - `interface` defaults to `lan0`, `lan1`, … in list order.
-- `address6` (optional, needs `prefix6`) adds a static IPv6 address in `prefix6`. Clash rules are the same as for `address`.
+- `address6` (optional, needs `prefix6`) adds a static IPv6 address in `prefix6`. Clash rules are the same as for `address`. A hook that sends `address6` needs a daemon from the release that added it: an older daemon refuses the unknown field.
 - `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
 - A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and nothing is left behind.
 - IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
@@ -124,7 +124,7 @@ An attachment is a kernel macvlan or ipvlan, so its traffic takes the kernel's n
 The Podman-side ordering comes from the references below. lanatt's own throughput has not been benchmarked.
 
 - **Fastest:** run the workload with `--network none`, so the attachment is its only network and every packet, inbound and outbound, stays in the kernel. The examples do this.
-- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the IPv4 default route stays on the engine network unless the join sets `"default": true`. An IPv6 default is added only when the join has `address6` and the network has `gateway6`, and the netns has no IPv6 default. Without that flag, internet-bound traffic goes through `pasta`; LAN traffic for the prefix still uses the attachment.
+- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the IPv4 default route stays on the engine network unless the join sets `"default": true`. An IPv6 default is added only when the join has `address6`, the network has `gateway6`, and the netns has no IPv6 default. With `"default": true`, an existing IPv6 default is replaced instead. Without that flag, internet-bound traffic goes through `pasta`; LAN traffic for the prefix still uses the attachment.
 - Port publishing (`-p`, `PublishPort=`) does not apply to the attachment: services listen on the attachment's address directly.
 - The MTU is the parent NIC's.
 
