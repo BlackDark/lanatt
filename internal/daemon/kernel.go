@@ -110,6 +110,10 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 		return err
 	}
 	*name = p.Interface
+	// Off before the link is up: an IPv4-only attachment must not SLAAC on a dual-stack LAN.
+	if err := setIPv6(ns, p.Interface, "disable_ipv6", "1"); err != nil {
+		return err
+	}
 	addr := fmt.Sprintf("%s/%d", p.Address, n.Prefix.Bits())
 	if _, err := inNetns(ns, "link", "set", "dev", p.Interface, "up"); err != nil {
 		return err
@@ -128,6 +132,14 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 	case RouteReplace:
 		_, err = inNetns(ns, "route", "replace", "default", "via", gw, "dev", p.Interface)
 	}
+	return err
+}
+
+// setIPv6 writes one net.ipv6.conf.<iface> sysctl inside the netns. ip(8) cannot set sysctls,
+// so the write runs under nsenter; the value and key are positional arguments, never spliced.
+func setIPv6(ns *os.File, iface, key, value string) error {
+	const script = `printf %s "$2" > "/proc/sys/net/ipv6/conf/$1/$3"`
+	_, err := run(ns, nsenterBin, "--net="+nsPath, "/bin/sh", "-c", script, "sh", iface, value, key)
 	return err
 }
 
