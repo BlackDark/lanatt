@@ -59,7 +59,7 @@ func TestIPv6SysctlsPerNetwork(t *testing.T) {
 		t.Errorf("IPv4-only: %v", got)
 	}
 	dual := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64")}
-	want := [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"}}
+	want := [][2]string{{"disable_ipv6", "0"}, {"accept_ra", "0"}, {"autoconf", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"}}
 	if got := ipv6Sysctls(dual); !slices.Equal(got, want) {
 		t.Errorf("dual-stack: %v", got)
 	}
