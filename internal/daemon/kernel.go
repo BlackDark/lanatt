@@ -162,12 +162,13 @@ func setDefault(ns *os.File, family string, gw netip.Addr, dev string, wantDefau
 }
 
 // ipv6Sysctls are the net.ipv6.conf.<iface> settings for a new attachment. A network with
-// prefix6 takes only the static addresses lanatt adds (ADR-0012); one without has no IPv6.
+// prefix6 takes only the static addresses lanatt adds (ADR-0012). Others write nothing: the
+// daemon's /proc/sys is read-only by default, and IPv4 joins must not depend on it.
 func ipv6Sysctls(n config.Network) [][2]string {
 	if n.HasIPv6() {
 		return [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
 	}
-	return [][2]string{{"disable_ipv6", "1"}}
+	return nil
 }
 
 // dadTimeout bounds how long a join waits for duplicate address detection to finish.

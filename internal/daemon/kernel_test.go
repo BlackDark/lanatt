@@ -54,7 +54,7 @@ func TestLinkAddArgsPerDriver(t *testing.T) {
 
 func TestIPv6SysctlsPerNetwork(t *testing.T) {
 	v4 := config.Network{}
-	if got := ipv6Sysctls(v4); len(got) != 1 || got[0] != [2]string{"disable_ipv6", "1"} {
+	if got := ipv6Sysctls(v4); len(got) != 0 {
 		t.Errorf("IPv4-only: %v", got)
 	}
 	dual := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64")}

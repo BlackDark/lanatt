@@ -108,8 +108,6 @@ check "address in netns" "in_ns $A -4 -br addr show lan0 | grep -q 10.254.1.2/28
 check "MAC in netns" "in_ns $A link show lan0 | grep -q 02:42:0a:fe:01:02"
 check "connected route" "in_ns $A route show | grep -q '10.254.1.0/28 dev lan0'"
 check "empty netns gains default via gateway" "in_ns $A route show default | grep -q 'via $GW dev lan0'"
-check "IPv4-only attachment has IPv6 disabled" "[[ \$(nsenter -t $A --net cat /proc/sys/net/ipv6/conf/lan0/disable_ipv6) == 1 ]]"
-
 # 2. The same join again succeeds.
 check "retry succeeds" "hook $U create ca $A '$(join 10.254.1.2 02:42:0a:fe:01:02)'"
 check "retry adds no interface" "[[ \$(in_ns $A -br link show type macvlan | wc -l) -eq 1 ]]"

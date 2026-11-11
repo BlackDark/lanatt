@@ -28,7 +28,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - `prefix6` (optional) turns on IPv6 for the network. It must be a `/48` to `/64` inside `fd00::/8` (ULA). A global prefix needs `allowGlobal6: true`. `gateway6` (optional) must be a host address in `prefix6`. Without `prefix6`, `gateway6` and `allowGlobal6` are refused. See ADR-0012.
-- IPv4-only attachments have IPv6 disabled. Attachments on a network with `prefix6` take only the addresses lanatt adds: no SLAAC, no RA routes.
+- Attachments on a network with `prefix6` take only the addresses lanatt adds: no SLAAC, no RA routes. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them (known gap).
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
 - On start, host devices named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
@@ -89,6 +89,7 @@ podman run -d --name lanatt --network host --pid host \
   ghcr.io/blackdark/lanatt:<version>
 ```
 
+- IPv6 networks (`prefix6`) write sysctls under `/proc/sys`, which is read-only in a container by default. Add `--security-opt unmask=/proc/sys` to the run command when you use `prefix6`. IPv4-only deployments do not need it.
 - `NET_ADMIN` creates the macvlan or ipvlan and configures it. `SYS_ADMIN` enters the workload netns (`setns`). `SYS_PTRACE` opens another user's `/proc/<pid>/ns/net`. Dropping any one of them breaks the join; this was checked one by one.
 - AppArmor: Podman's `containers-default` profile denies reading another process's `/proc/<pid>/ns/net` even with `SYS_PTRACE`, so the container runs unconfined. Docker applies its own `docker-default` profile; running the daemon under Docker with these flags is untested.
 - The root filesystem can be read-only: the daemon writes only to the `/run/lanatt` mount, which holds the socket and the state file.
