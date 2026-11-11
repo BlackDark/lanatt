@@ -238,3 +238,36 @@ func TestHolderWithoutOwnerPid(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func ipvlanNets(t *testing.T) map[string]config.Network {
+	t.Helper()
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"v","parent":"d0","prefix":"10.254.3.0/28","gateway":"10.254.3.14","driver":"ipvlan"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Networks
+}
+
+// An ipvlan attachment has the parent's MAC: it records none, names none, and does not clash on MAC.
+func TestIPvlanHasNoMAC(t *testing.T) {
+	nets := ipvlanNets(t)
+	s := State{}
+	p, err := Plan(s, nets, 1000, "c", 1, []wire.Join{{Network: "v", Address: "10.254.3.2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = s.Add(p)
+	if _, err := Plan(s, nets, 1000, "d", 2, []wire.Join{{Network: "v", Address: "10.254.3.3"}}); err != nil {
+		t.Errorf("second ipvlan attachment refused: %v", err)
+	}
+	if _, err := Plan(State{}, nets, 1000, "c", 1, []wire.Join{{Network: "v", Address: "10.254.3.2", MAC: "02:00:00:00:00:02"}}); err == nil {
+		t.Error("ipvlan join with a MAC admitted")
+	}
+}
+
+func TestMacvlanStillNeedsMAC(t *testing.T) {
+	if _, err := Plan(State{}, nets(t), 1000, "c", 1, []wire.Join{{Network: "a", Address: "10.254.1.2"}}); err == nil {
+		t.Error("macvlan join without a MAC admitted")
+	}
+}

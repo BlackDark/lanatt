@@ -15,17 +15,17 @@ A small root daemon and an OCI hook. The container stays rootless; only the daem
 
 A rootless container cannot create a macvlan, because the host NIC is outside its network namespace. To give such a container its own LAN address today, you run it rootful. lanatt moves only that one privileged step into a root daemon.
 
-- **Rootless workloads on the LAN**: a container gets its own IPv4 address and MAC. Other hosts reach it directly.
-- **The admin defines the networks**: callers choose a named network, an address and a MAC. They never choose the NIC.
+- **Rootless workloads on the LAN**: a container gets its own IPv4 address, and a MAC on macvlan networks. Other hosts reach it directly.
+- **The admin defines the networks**: callers choose a named network, an address and, on macvlan, a MAC. They never choose the NIC.
 - **Joined before start**: the attachment exists before the workload process runs. A refused join fails the start.
-- **No duplicate addresses**: lanatt refuses an address or MAC that another container already holds. The kernel alone would allow it.
+- **No duplicate addresses**: lanatt refuses an address, or a MAC on macvlan, that another container already holds. The kernel alone would allow it.
 
 ## How it works
 
 1. The administrator lists networks and allowed UIDs in `/etc/lanatt/config.json`.
-2. A container carries the annotation `io.lanatt.attachments`: network, IPv4 address, MAC.
+2. A container carries the annotation `io.lanatt.attachments`: network, IPv4 address, and MAC on macvlan.
 3. Before the workload starts, the engine runs `lanatt hook create` as the container's user. The hook sends the join to the daemon over a Unix socket.
-4. The daemon checks the caller's UID, creates a macvlan on the parent NIC, moves it into the container's netns, and sets the address and routes.
+4. The daemon checks the caller's UID, creates a macvlan (or ipvlan) on the parent NIC, moves it into the container's netns, and sets the address and routes.
 5. On stop, `lanatt hook stop` releases the address. The interface disappears with the netns.
 
 ## Install
@@ -99,9 +99,9 @@ Macvlan does not let the host reach its own attachments through the parent NIC. 
 
 Yes, with `"allowRoot": true` in the config. Rootful containers then use the same annotation and get the same duplicate-address protection as rootless ones. See [ADR-0009](docs/adr/0009-root-callers.md).
 
-### Does it do IPv6, DHCP or ipvlan?
+### Does it do IPv6 or DHCP?
 
-Not in v1. Addresses are static IPv4, and only the `macvlan` driver is accepted.
+Not in v1. Addresses are static IPv4. Networks use `macvlan` or `ipvlan` (L2); ipvlan attachments take no MAC. See [ADR-0011](docs/adr/0011-ipvlan.md).
 
 ## Development
 

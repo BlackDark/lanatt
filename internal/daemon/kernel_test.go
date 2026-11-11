@@ -1,6 +1,12 @@
 package daemon
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"lanatt/internal/claims"
+	"lanatt/internal/config"
+)
 
 func TestDecideRoute(t *testing.T) {
 	cases := []struct {
@@ -30,5 +36,17 @@ func TestStaleTemps(t *testing.T) {
 	}
 	if name := TempName(0x1f0000329, 3); name != "ltf00003293" || len(StaleTemps("1: "+name+": x")) != 1 {
 		t.Fatalf("TempName %q not recognised", name)
+	}
+}
+
+func TestLinkAddArgsPerDriver(t *testing.T) {
+	p := claims.Planned{Claim: claims.Claim{MAC: "02:42:0a:00:01:33"}}
+	mac := strings.Join(linkAddArgs(config.Network{Parent: "eth0", Driver: config.DriverMacvlan}, p, "lt1"), " ")
+	if mac != "link add link eth0 name lt1 address 02:42:0a:00:01:33 type macvlan mode bridge" {
+		t.Errorf("macvlan: %s", mac)
+	}
+	ipv := strings.Join(linkAddArgs(config.Network{Parent: "eth0", Driver: config.DriverIPvlan}, p, "lt1"), " ")
+	if ipv != "link add link eth0 name lt1 type ipvlan mode l2" {
+		t.Errorf("ipvlan: %s", ipv)
 	}
 }

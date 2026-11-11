@@ -6,7 +6,7 @@ A claim also records its owner: the attach request's pid, that pid's start time,
 
 State lives under `/run/lanatt` (tmpfs). Attachments do not survive a reboot, so claims must not either; the owner check guards the cases where a reboot is not involved. Each join is saved as soon as it succeeds, so an attachment in a netns always has a claim.
 
-On start, lanatt deletes host macvlans that carry its temporary name, `lt<8 hex><n>`. Such a device exists only if the daemon died between creating it and moving it into the netns. A config with an empty allowlist fails at load, because that daemon would refuse every caller.
+On start, lanatt deletes host devices that carry its temporary name, `lt<8 hex><n>`. Such a device exists only if the daemon died between creating it and moving it into the netns. A config with an empty allowlist fails at load, because that daemon would refuse every caller.
 
 ## Considered options
 

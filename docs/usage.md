@@ -24,11 +24,11 @@ lanatt daemon -config /etc/lanatt/config.json
 - `socket` and `state` default to the values above. `state` is on tmpfs: attachments do not survive a reboot, so claims must not either.
 - `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
 - `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
-- `driver` must be `macvlan`; the device is created in bridge mode.
+- `driver` is `macvlan` (bridge mode, each attachment has its own MAC) or `ipvlan` (L2 mode, no MAC: attachments share the parent's). See ADR-0011. A parent carries one driver: macvlan and ipvlan networks cannot share a `parent`.
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
-- On start, host macvlans named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
+- On start, host devices named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
 
 The daemon calls `/usr/sbin/ip` and `/usr/bin/nsenter`.
@@ -84,7 +84,7 @@ podman run -d --name lanatt --network host --pid host \
   ghcr.io/blackdark/lanatt:<version>
 ```
 
-- `NET_ADMIN` creates the macvlan and configures it. `SYS_ADMIN` enters the workload netns (`setns`). `SYS_PTRACE` opens another user's `/proc/<pid>/ns/net`. Dropping any one of them breaks the join; this was checked one by one.
+- `NET_ADMIN` creates the macvlan or ipvlan and configures it. `SYS_ADMIN` enters the workload netns (`setns`). `SYS_PTRACE` opens another user's `/proc/<pid>/ns/net`. Dropping any one of them breaks the join; this was checked one by one.
 - AppArmor: Podman's `containers-default` profile denies reading another process's `/proc/<pid>/ns/net` even with `SYS_PTRACE`, so the container runs unconfined. Docker applies its own `docker-default` profile; running the daemon under Docker with these flags is untested.
 - The root filesystem can be read-only: the daemon writes only to the `/run/lanatt` mount, which holds the socket and the state file.
 
@@ -102,15 +102,15 @@ The hook runs on the host. Each release attaches `lanatt-linux-amd64`, `lanatt-l
 
 Ready-to-install files for Podman, Quadlet, Docker and Compose are in [`examples/`](../examples/README.md).
 
-The host cannot reach its own macvlan attachments. Test from another LAN host.
+The host cannot reach its own macvlan attachments. Test from another LAN host. ipvlan attachments were tested only between each other on a dummy parent; the host cannot reach them either (ADR-0011).
 
 ## Performance
 
-An attachment is a kernel macvlan, so its traffic takes the kernel's normal path, like the host's own NIC. No user-space forwarder sits in between, unlike Podman's rootless networks:
+An attachment is a kernel macvlan or ipvlan, so its traffic takes the kernel's normal path, like the host's own NIC. No user-space forwarder sits in between, unlike Podman's rootless networks:
 
 | Path | Datapath |
 |---|---|
-| lanatt attachment | Kernel macvlan |
+| lanatt attachment | Kernel macvlan or ipvlan |
 | `--network host`, systemd socket activation | Kernel, the host's own sockets |
 | `pasta` (rootless default since Podman 5.0) | User space, no NAT |
 | `slirp4netns` (legacy, planned for removal in Podman 6) | User space with NAT, the slowest |

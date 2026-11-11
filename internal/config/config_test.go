@@ -23,9 +23,19 @@ func TestParseValidNetwork(t *testing.T) {
 	}
 }
 
+func TestParseIPvlan(t *testing.T) {
+	cfg, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"ipvlan"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Networks["lan"].Driver != DriverIPvlan {
+		t.Fatalf("driver %q", cfg.Networks["lan"].Driver)
+	}
+}
+
 func TestParseRefuses(t *testing.T) {
 	cases := map[string]string{
-		"ipvlan driver":    `{"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"ipvlan"}`,
+		"unknown driver":   `{"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"vxlan"}`,
 		"gateway outside":  `{"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.2.1","driver":"macvlan"}`,
 		"gateway network":  `{"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.0","driver":"macvlan"}`,
 		"gateway bcast":    `{"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.15","driver":"macvlan"}`,
@@ -73,5 +83,15 @@ func TestAllowRoot(t *testing.T) {
 	}
 	if _, err := Parse([]byte(`{"uids":[0],"allowRoot":true}`)); err == nil {
 		t.Error("uid 0 in uids accepted")
+	}
+}
+
+// The kernel allows one rx handler per device, so macvlan and ipvlan cannot share a parent.
+func TestParseRefusesMixedDriversOnParent(t *testing.T) {
+	_, err := Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"ipvlan"}]}`))
+	if err == nil {
+		t.Fatal("macvlan and ipvlan on one parent admitted")
 	}
 }

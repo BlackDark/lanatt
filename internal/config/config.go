@@ -13,8 +13,12 @@ import (
 	"lanatt/internal/wire"
 )
 
-// DriverMacvlan is the only driver v1 accepts.
+// DriverMacvlan creates a bridge-mode macvlan: each attachment has its own MAC.
 const DriverMacvlan = "macvlan"
+
+// DriverIPvlan creates an L2-mode ipvlan: attachments share the parent's MAC, so a join
+// carries no MAC. See ADR-0011.
+const DriverIPvlan = "ipvlan"
 
 // Network is an administrator-defined LAN that callers join by name.
 type Network struct {
@@ -99,6 +103,7 @@ func Parse(data []byte) (Config, error) {
 	if len(cfg.UIDs) == 0 && !cfg.AllowRoot {
 		return Config{}, errors.New("config: uids is empty, so every caller would be refused")
 	}
+	driverOn := map[string]string{}
 	for _, rn := range raw.Networks {
 		n, err := parseNetwork(rn)
 		if err != nil {
@@ -107,6 +112,10 @@ func Parse(data []byte) (Config, error) {
 		if _, dup := cfg.Networks[n.Name]; dup {
 			return Config{}, fmt.Errorf("config: network %q defined twice", n.Name)
 		}
+		if other, ok := driverOn[n.Parent]; ok && other != n.Driver {
+			return Config{}, fmt.Errorf("config: network %q: parent %q already carries %s networks; macvlan and ipvlan cannot share a parent", n.Name, n.Parent, other)
+		}
+		driverOn[n.Parent] = n.Driver
 		cfg.Networks[n.Name] = n
 	}
 	return cfg, nil
@@ -116,8 +125,8 @@ func parseNetwork(rn rawNetwork) (Network, error) {
 	if rn.Name == "" {
 		return Network{}, errors.New("name is empty")
 	}
-	if rn.Driver != DriverMacvlan {
-		return Network{}, fmt.Errorf("driver %q is not supported, only %q", rn.Driver, DriverMacvlan)
+	if rn.Driver != DriverMacvlan && rn.Driver != DriverIPvlan {
+		return Network{}, fmt.Errorf("driver %q is not supported, use %q or %q", rn.Driver, DriverMacvlan, DriverIPvlan)
 	}
 	if !ValidInterfaceName(rn.Parent) {
 		return Network{}, fmt.Errorf("parent %q is not an interface name", rn.Parent)

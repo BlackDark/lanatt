@@ -114,7 +114,7 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 	if !n.InRanges(addr) {
 		return Planned{}, fmt.Errorf("address %s is outside the network's ranges", addr)
 	}
-	mac, err := parseMAC(j.MAC)
+	mac, err := joinMAC(n, j.MAC)
 	if err != nil {
 		return Planned{}, err
 	}
@@ -138,11 +138,23 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 		if c.Address == addr {
 			return Planned{}, fmt.Errorf("address %s is taken by %s", addr, Holder(c))
 		}
-		if c.MAC == mac {
+		if mac != "" && c.MAC == mac {
 			return Planned{}, fmt.Errorf("MAC %s is taken by %s", mac, Holder(c))
 		}
 	}
 	return Planned{Claim: want, Default: j.Default}, nil
+}
+
+// joinMAC is the MAC a claim records. An ipvlan attachment has the parent's MAC, so it has
+// none of its own and must not name one.
+func joinMAC(n config.Network, s string) (string, error) {
+	if n.Driver == config.DriverIPvlan {
+		if s != "" {
+			return "", errors.New("MAC is not set on an ipvlan network: attachments share the parent's MAC")
+		}
+		return "", nil
+	}
+	return parseMAC(s)
 }
 
 func parseMAC(s string) (string, error) {
