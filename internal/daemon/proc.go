@@ -131,14 +131,14 @@ func startTime(pid int) (string, error) {
 	return fields[19], nil
 }
 
-// bootID identifies this boot; a claim from another boot cannot be live.
-func bootID() (string, error) {
+// BootID identifies this boot; a claim from another boot cannot be live.
+func BootID() (string, error) {
 	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
 	return strings.TrimSpace(string(data)), err
 }
 
-// deadReason says why c is not held by a live workload, or "" when it is.
-func deadReason(c claims.Claim, boot string) string {
+// DeadReason says why c is not held by a live workload, or "" when it is.
+func DeadReason(c claims.Claim, boot string) string {
 	if c.OwnerPid == 0 || c.OwnerStart == "" {
 		return "no owner recorded"
 	}
@@ -173,7 +173,16 @@ func deadReason(c claims.Claim, boot string) string {
 	return ""
 }
 
-// liveClaim keeps the claims deadReason does not reject.
-func liveClaim(boot string) func(claims.Claim) bool {
-	return func(c claims.Claim) bool { return deadReason(c, boot) == "" }
+// LiveClaim is the Prune predicate; `lanatt claims` uses DeadReason too, so both agree.
+func LiveClaim(boot string) func(claims.Claim) bool {
+	return func(c claims.Claim) bool { return DeadReason(c, boot) == "" }
+}
+
+// OwnerComm is the command name of pid, or "" when it cannot be read.
+func OwnerComm(pid int) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }

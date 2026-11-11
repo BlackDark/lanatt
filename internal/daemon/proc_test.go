@@ -39,7 +39,7 @@ func TestDeadReason(t *testing.T) {
 	for name, c := range cases {
 		cl := selfClaim(t)
 		c.mut(&cl)
-		if got := deadReason(cl, "boot"); got != c.want {
+		if got := DeadReason(cl, "boot"); got != c.want {
 			t.Errorf("%s: got %q want %q", name, got, c.want)
 		}
 	}
@@ -50,7 +50,7 @@ func TestLiveClaimPrunes(t *testing.T) {
 	drop := keep
 	drop.OwnerStart = "0"
 	s := claims.State{Claims: []claims.Claim{keep, drop}}
-	got := s.Prune(liveClaim("boot"))
+	got := s.Prune(LiveClaim("boot"))
 	if len(got.Claims) != 1 || got.Claims[0] != keep {
 		t.Fatalf("prune kept %+v", got.Claims)
 	}
