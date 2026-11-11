@@ -1,6 +1,7 @@
 package claims
 
 import (
+	"net/netip"
 	"path/filepath"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestDropAndPrune(t *testing.T) {
 	if got := s.Drop(1001, "c"); len(got.Claims) != 2 {
 		t.Errorf("another uid dropped a claim: %+v", got)
 	}
-	if got := s.Prune(func(c Claim) bool { return c.ID == "c" }); len(got.Claims) != 1 || got.Claims[0].ID != "c" {
+	if got, dropped := s.Prune(func(c Claim) bool { return c.ID == "c" }); len(got.Claims) != 1 || got.Claims[0].ID != "c" || len(dropped) != 1 || dropped[0].ID != "d" {
 		t.Errorf("prune: %+v", got)
 	}
 	if _, err := Plan(s.Drop(1000, "c"), nets(t), 1000, "e", 3, []wire.Join{j1}); err != nil {
@@ -201,5 +202,39 @@ func TestOwnStampsOnlyNewClaims(t *testing.T) {
 	c := Own(plans, owner)[0].Claim
 	if c.BootID != "boot" || c.OwnerPid != 42 || c.OwnerStart != "777" {
 		t.Errorf("new claim not owned: %+v", c)
+	}
+}
+
+func TestRefusalNamesHolder(t *testing.T) {
+	s := State{Claims: []Claim{{
+		ID: "a6eabd1adc12ffff", UID: 1001, Netns: 4026532504, Network: "a",
+		Address: netip.MustParseAddr("10.254.1.2"), MAC: "02:00:00:00:00:02",
+		Interface: "lan0", OwnerPid: 4711,
+	}}}
+	cases := map[string]struct {
+		join wire.Join
+		want string
+	}{
+		"address": {
+			wire.Join{Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:09"},
+			`network "a": address 10.254.1.2 is taken by claim a6eabd1adc12 (uid 1001, netns 4026532504, lan0, pid 4711)`,
+		},
+		"MAC": {
+			wire.Join{Network: "a", Address: "10.254.1.3", MAC: "02:00:00:00:00:02"},
+			`network "a": MAC 02:00:00:00:00:02 is taken by claim a6eabd1adc12 (uid 1001, netns 4026532504, lan0, pid 4711)`,
+		},
+	}
+	for name, c := range cases {
+		_, err := Plan(s, nets(t), 1000, "c", 2, []wire.Join{c.join})
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: got %v\nwant %s", name, err, c.want)
+		}
+	}
+}
+
+func TestHolderWithoutOwnerPid(t *testing.T) {
+	c := Claim{ID: "short", UID: 1, Netns: 2, Interface: "lan1"}
+	if got := Holder(c); got != "claim short (uid 1, netns 2, lan1)" {
+		t.Errorf("got %q", got)
 	}
 }

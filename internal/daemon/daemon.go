@@ -48,7 +48,8 @@ func New(cfg config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	st = st.Prune(LiveClaim(boot))
+	log.Printf("claims: %d loaded", len(st.Claims))
+	st = prune(st, boot)
 	if err := claims.Save(cfg.State, st); err != nil {
 		return nil, err
 	}
@@ -59,6 +60,15 @@ func New(cfg config.Config) (*Server, error) {
 // socket through it; it must exist before the state file, or Save would create it 0700.
 func prepareSocketDir(socket string) error {
 	return os.MkdirAll(filepath.Dir(socket), 0o755)
+}
+
+// prune drops the claims no live workload holds, and logs each one with its reason.
+func prune(s claims.State, boot string) claims.State {
+	out, dropped := s.Prune(LiveClaim(boot))
+	for _, c := range dropped {
+		log.Printf("dropped claim %s %s: %s", claims.ShortID(c.ID), c.Address, DeadReason(c, boot))
+	}
+	return out
 }
 
 // Listen opens the socket. Any local user may connect; peer credentials decide.
@@ -152,7 +162,7 @@ func (s *Server) attach(uid uint32, req wire.Request) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A netns inode can be reused, so a dead workload's claim must not look like this one's.
-	if err := s.commit(s.state.Prune(LiveClaim(s.boot))); err != nil {
+	if err := s.commit(prune(s.state, s.boot)); err != nil {
 		return err
 	}
 	plans, err := claims.Plan(s.state, s.cfg.Networks, uid, req.ID, t.netns, req.Joins)
