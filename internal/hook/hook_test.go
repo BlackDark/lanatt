@@ -50,6 +50,10 @@ func TestBadInput(t *testing.T) {
 	if _, err := Request("create", strings.NewReader(state), bundle(`{"io.lanatt.attachments":"nope"}`)); err == nil {
 		t.Error("bad annotation accepted")
 	}
+	misspelt := `{"io.lanatt.attachments":"[{\"network\":\"a\",\"address\":\"10.254.1.2\",\"ipv6\":\"fd00::2\"}]"}`
+	if _, err := Request("create", strings.NewReader(state), bundle(misspelt)); err == nil {
+		t.Error("unknown join field accepted")
+	}
 	if _, err := Request("start", strings.NewReader(state), bundle(`{}`)); err == nil {
 		t.Error("unknown stage accepted")
 	}
