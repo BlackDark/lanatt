@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"lanatt/internal/claimlist"
+	"lanatt/internal/claims"
 	"lanatt/internal/config"
 	"lanatt/internal/daemon"
 	"lanatt/internal/hook"
@@ -21,7 +23,8 @@ import (
 
 const usage = `usage:
   lanatt daemon [-config /etc/lanatt/config.json]
-  lanatt hook create|stop [-socket /run/lanatt/lanatt.sock]`
+  lanatt hook create|stop [-socket /run/lanatt/lanatt.sock]
+  lanatt claims [-config /etc/lanatt/config.json] [-json]`
 
 func main() {
 	if runtime.IsWrapper(os.Args[0]) {
@@ -36,6 +39,8 @@ func main() {
 		err = runDaemon(os.Args[2:])
 	case "hook":
 		err = runHook(os.Args[2:])
+	case "claims":
+		err = runClaims(os.Args[2:])
 	default:
 		fail(usage)
 	}
@@ -75,6 +80,35 @@ func runDaemon(args []string) error {
 	}()
 	log.Printf("listening on %s", cfg.Socket)
 	return srv.Serve(ln)
+}
+
+// runClaims lists the stored claims read-only. It needs the state file, so it runs as root.
+func runClaims(args []string) error {
+	fs := flag.NewFlagSet("claims", flag.ContinueOnError)
+	path := fs.String("config", "/etc/lanatt/config.json", "config file")
+	asJSON := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+	st, err := claims.Load(cfg.State)
+	if err != nil {
+		return err
+	}
+	boot, err := daemon.BootID()
+	if err != nil {
+		return err
+	}
+	rows := claimlist.Rows(st, func(c claims.Claim) string {
+		return daemon.DeadReason(c, boot)
+	}, daemon.OwnerComm)
+	if *asJSON {
+		return claimlist.WriteJSON(os.Stdout, rows)
+	}
+	return claimlist.WriteTable(os.Stdout, rows, boot)
 }
 
 func runHook(args []string) error {

@@ -53,6 +53,25 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - `default: true` replaces the netns default route with one via the network gateway. Without it, a default route is added only when the netns has none.
 - The same join again is success. A different address or MAC for the same network and netns, or an address or MAC another netns holds on that network, is refused.
 
+## Debugging claims
+
+`lanatt claims` lists the stored claims and whether each is still held by a live workload. It is read-only and needs root, since the state file is root-owned.
+
+```sh
+lanatt claims [-config /etc/lanatt/config.json] [-json]
+```
+
+```text
+ID            UID   NETWORK  ADDRESS    MAC                IFACE  NETNS       BOOT      OWNER         REASON
+a6eabd1adc12  1001  lan      10.0.1.51  02:42:0a:00:01:33  lan0   4026532504  this      4711/traefik  -
+b7fbce2bed23  1001  lan      10.0.1.52  02:42:0a:00:01:34  lan0   4026532505  previous  none          other boot
+```
+
+- `BOOT` is `this` for the current boot, `previous` for an earlier one, `unknown` for a legacy claim with no boot id.
+- `OWNER` is `pid/comm` of the owner while it is alive, a bare pid if its name cannot be read, or `none` when the claim is dead.
+- `REASON` is why a claim is dead: `other boot`, `owner gone`, `owner pid reused`, `netns changed`, or `no owner recorded`. `-` when alive.
+- `-json` prints an array of claim objects with every claim field (`id`, `uid`, `netns`, `network`, `address`, `mac`, `interface`, `boot_id`, `owner_pid`, `owner_start`), plus `alive`, `reason` (empty when alive) and `owner_comm`. The table's short id and labels are not used. An empty state prints `[]`.
+
 ## Container image
 
 The image runs the daemon. Linux `amd64` and `arm64`, published to GHCR when a release-please release PR is merged. It needs the host netns, the host pid namespace, root, and three capabilities:

@@ -44,11 +44,11 @@ func New(cfg config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	boot, err := bootID()
+	boot, err := BootID()
 	if err != nil {
 		return nil, err
 	}
-	st = st.Prune(liveClaim(boot))
+	st = st.Prune(LiveClaim(boot))
 	if err := claims.Save(cfg.State, st); err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (s *Server) attach(uid uint32, req wire.Request) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A netns inode can be reused, so a dead workload's claim must not look like this one's.
-	if err := s.commit(s.state.Prune(liveClaim(s.boot))); err != nil {
+	if err := s.commit(s.state.Prune(LiveClaim(s.boot))); err != nil {
 		return err
 	}
 	plans, err := claims.Plan(s.state, s.cfg.Networks, uid, req.ID, t.netns, req.Joins)

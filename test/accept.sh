@@ -204,6 +204,16 @@ netns "$U"; M=$NSPID
 check "new workload gets the stale address" "hook $U create cm $M '[{\"network\":\"lab2\",\"address\":\"10.254.1.20\",\"mac\":\"02:42:0a:fe:01:21\"}]'"
 check "new workload has the address" "in_ns $M -4 -br addr show lan0 | grep -q 10.254.1.20/28"
 
+# 16. `lanatt claims` shows the owner, then the reason once the owner is gone, and never writes.
+netns "$U"; Q=$NSPID
+check "owner joins for claims listing" "hook $U create cq $Q '[{\"network\":\"lab2\",\"address\":\"10.254.1.17\",\"mac\":\"02:42:0a:fe:01:17\"}]'"
+cp "$STATE" "$WORK/state.before"
+check "claims lists the live owner" "$BIN claims -config $CFG | grep -E '10\.254\.1\.17 .* $Q/sleep .*-\$'"
+check "claims -json marks it alive" "$BIN claims -config $CFG -json | grep -q '\"alive\": true'"
+kill "$Q"; sleep 0.3
+check "claims shows owner none with reason" "$BIN claims -config $CFG | grep -E '10\.254\.1\.17 .* none .* owner gone\$'"
+check "claims leaves the state file unchanged" "cmp -s '$STATE' '$WORK/state.before'"
+
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"
 echo "$pass passed, $fail failed"
