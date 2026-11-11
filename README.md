@@ -101,7 +101,7 @@ Yes, with `"allowRoot": true` in the config. Rootful containers then use the sam
 
 ### Does it do IPv6 or DHCP?
 
-Not in v1. Addresses are static IPv4. Networks use `macvlan` or `ipvlan` (L2); ipvlan attachments take no MAC. See [ADR-0011](docs/adr/0011-ipvlan.md).
+IPv6 is opt-in and static: a network with `prefix6` can give an attachment a ULA address per join. Nothing is assigned by default. Global prefixes need an explicit `allowGlobal6`. No SLAAC, no DHCPv6. See [ADR-0012](docs/adr/0012-ipv6-ula.md) and [usage](docs/usage.md). Networks use `macvlan` or `ipvlan` (L2); ipvlan attachments take no MAC ([ADR-0011](docs/adr/0011-ipvlan.md)).
 
 ## Development
 
