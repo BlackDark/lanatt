@@ -2,7 +2,7 @@
 
 Joining a network installs a connected route for that prefix. When the workload netns has no default route, lanatt adds one via the network gateway. The caller can mark the attachment as the default route and replace the one already there.
 
-Amended by ADR-0012: the rule applies per address family. A v6 default is added or replaced only when the network has a `gateway6` and the attachment has an `address6`. The netns never takes an RA route.
+Amended by ADR-0012: the rule applies per address family. A v6 default is added or replaced only when the network has a `gateway6` and the attachment has an `address6`. On a `prefix6` network the netns never takes an RA route.
 
 ## Considered options
 
