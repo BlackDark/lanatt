@@ -134,16 +134,29 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 			return err
 		}
 	}
-	out, err := inNetns(ns, "-4", "route", "show", "default")
+	if err := setDefault(ns, "-4", n.Gateway, p.Interface, p.Default); err != nil {
+		return err
+	}
+	// A v6 default needs both a gateway6 and this attachment's own address6; otherwise the
+	// attachment is connected-route only in IPv6.
+	if n.Gateway6.IsValid() && p.Address6.IsValid() {
+		return setDefault(ns, "-6", n.Gateway6, p.Interface, p.Default)
+	}
+	return nil
+}
+
+// setDefault applies ADR-0005 to one family. family is "-4" or "-6"; the query and the change
+// name the family explicitly, since `ip route show default` without one mixes both.
+func setDefault(ns *os.File, family string, gw netip.Addr, dev string, wantDefault bool) error {
+	out, err := inNetns(ns, family, "route", "show", "default")
 	if err != nil {
 		return err
 	}
-	gw := n.Gateway.String()
-	switch DecideRoute(strings.TrimSpace(out) != "", p.Default) {
+	switch DecideRoute(strings.TrimSpace(out) != "", wantDefault) {
 	case RouteAdd:
-		_, err = inNetns(ns, "route", "add", "default", "via", gw, "dev", p.Interface)
+		_, err = inNetns(ns, family, "route", "add", "default", "via", gw.String(), "dev", dev)
 	case RouteReplace:
-		_, err = inNetns(ns, "route", "replace", "default", "via", gw, "dev", p.Interface)
+		_, err = inNetns(ns, family, "route", "replace", "default", "via", gw.String(), "dev", dev)
 	}
 	return err
 }
