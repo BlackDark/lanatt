@@ -110,9 +110,11 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 		return err
 	}
 	*name = p.Interface
-	// Off before the link is up: an IPv4-only attachment must not SLAAC on a dual-stack LAN.
-	if err := setIPv6(ns, p.Interface, "disable_ipv6", "1"); err != nil {
-		return err
+	// Set before the link is up, so no RA is ever processed.
+	for _, kv := range ipv6Sysctls(n) {
+		if err := setIPv6(ns, p.Interface, kv[0], kv[1]); err != nil {
+			return err
+		}
 	}
 	addr := fmt.Sprintf("%s/%d", p.Address, n.Prefix.Bits())
 	if _, err := inNetns(ns, "link", "set", "dev", p.Interface, "up"); err != nil {
@@ -120,6 +122,12 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 	}
 	if _, err := inNetns(ns, "addr", "add", addr, "dev", p.Interface); err != nil {
 		return err
+	}
+	if p.Address6.IsValid() {
+		addr6 := fmt.Sprintf("%s/%d", p.Address6, n.Prefix6.Bits())
+		if _, err := inNetns(ns, "addr", "add", addr6, "dev", p.Interface); err != nil {
+			return err
+		}
 	}
 	out, err := inNetns(ns, "-4", "route", "show", "default")
 	if err != nil {
@@ -133,6 +141,15 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) er
 		_, err = inNetns(ns, "route", "replace", "default", "via", gw, "dev", p.Interface)
 	}
 	return err
+}
+
+// ipv6Sysctls are the net.ipv6.conf.<iface> settings for a new attachment. A network with
+// prefix6 takes only the static addresses lanatt adds (ADR-0012); one without has no IPv6.
+func ipv6Sysctls(n config.Network) [][2]string {
+	if n.HasIPv6() {
+		return [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
+	}
+	return [][2]string{{"disable_ipv6", "1"}}
 }
 
 // setIPv6 writes one net.ipv6.conf.<iface> sysctl inside the netns. ip(8) cannot set sysctls,

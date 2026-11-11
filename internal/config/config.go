@@ -29,6 +29,9 @@ type Network struct {
 	Driver  string
 	// Ranges limits which addresses callers may claim; empty means the whole prefix.
 	Ranges []Range
+	// Prefix6 and Gateway6 enable IPv6; zero means none. See ADR-0012.
+	Prefix6  netip.Prefix
+	Gateway6 netip.Addr
 }
 
 // Config is the validated daemon config.
@@ -48,6 +51,10 @@ type rawNetwork struct {
 	Gateway string   `json:"gateway"`
 	Driver  string   `json:"driver"`
 	Ranges  []string `json:"ranges"`
+	// Prefix6 switches IPv6 on; see ADR-0012.
+	Prefix6      string `json:"prefix6"`
+	Gateway6     string `json:"gateway6"`
+	AllowGlobal6 bool   `json:"allowGlobal6"`
 }
 
 type rawConfig struct {
@@ -155,7 +162,64 @@ func parseNetwork(rn rawNetwork) (Network, error) {
 	if n.Ranges, err = parseRanges(n, rn.Ranges); err != nil {
 		return Network{}, err
 	}
+	if err := parseIPv6(&n, rn); err != nil {
+		return Network{}, err
+	}
 	return n, nil
+}
+
+// parseIPv6 reads the optional IPv6 part of a network. Without prefix6 the network has no
+// IPv6, so gateway6 and allowGlobal6 would do nothing and are refused.
+func parseIPv6(n *Network, rn rawNetwork) error {
+	if rn.Prefix6 == "" {
+		if rn.Gateway6 != "" || rn.AllowGlobal6 {
+			return errors.New("gateway6 and allowGlobal6 need prefix6")
+		}
+		return nil
+	}
+	p, err := netip.ParsePrefix(rn.Prefix6)
+	if err != nil {
+		return fmt.Errorf("prefix6: %w", err)
+	}
+	if !p.Addr().Is6() || p.Addr().Is4In6() {
+		return fmt.Errorf("prefix6 %s must be IPv6", p)
+	}
+	if p.Bits() < 48 || p.Bits() > 64 {
+		return fmt.Errorf("prefix6 %s must be /48 to /64", p)
+	}
+	if p != p.Masked() {
+		return fmt.Errorf("prefix6 %s has host bits set", p)
+	}
+	a := p.Addr()
+	if a.IsLinkLocalUnicast() || a.IsMulticast() || a.IsLoopback() || a.IsUnspecified() {
+		return fmt.Errorf("prefix6 %s is not a unicast LAN prefix", p)
+	}
+	if !rn.AllowGlobal6 && a.As16()[0] != 0xfd {
+		return fmt.Errorf("prefix6 %s is not ULA (fd00::/8); set allowGlobal6 for a global prefix", p)
+	}
+	n.Prefix6 = p
+	if rn.Gateway6 == "" {
+		return nil
+	}
+	gw, err := netip.ParseAddr(rn.Gateway6)
+	if err != nil {
+		return fmt.Errorf("gateway6: %w", err)
+	}
+	if !n.IsHost6(gw) {
+		return fmt.Errorf("gateway6 %s is not a host address in %s", gw, p)
+	}
+	n.Gateway6 = gw
+	return nil
+}
+
+// HasIPv6 reports whether the network carries IPv6 addresses.
+func (n Network) HasIPv6() bool {
+	return n.Prefix6.IsValid()
+}
+
+// IsHost6 reports whether a is in Prefix6 and is not its subnet-router anycast address.
+func (n Network) IsHost6(a netip.Addr) bool {
+	return n.HasIPv6() && n.Prefix6.Contains(a) && a != n.Prefix6.Masked().Addr()
 }
 
 // IsHost reports whether a is inside the prefix and is neither its network nor broadcast address.

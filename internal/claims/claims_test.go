@@ -271,3 +271,91 @@ func TestMacvlanStillNeedsMAC(t *testing.T) {
 		t.Error("macvlan join without a MAC admitted")
 	}
 }
+
+// nets6 is the fixture for IPv6 joins: a dual-stack network "a" and an IPv4-only "b".
+func nets6() map[string]config.Network {
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:1::/64","gateway6":"fd00:1::1"},
+		{"name":"b","parent":"d1","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan"}]}`))
+	if err != nil {
+		panic(err)
+	}
+	return cfg.Networks
+}
+
+func plan6(s State, ns uint64, j wire.Join) (Planned, error) {
+	p, err := Plan(s, nets6(), 1000, "c", ns, []wire.Join{j})
+	if err != nil {
+		return Planned{}, err
+	}
+	return p[0], nil
+}
+
+var v6 = wire.Join{Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Address6: "fd00:1::2"}
+
+func TestAddress6Refusals(t *testing.T) {
+	cases := map[string]wire.Join{
+		"no prefix6":      {Network: "b", Address: "10.254.2.2", MAC: "02:00:00:00:00:02", Address6: "fd00:2::2"},
+		"outside prefix6": {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Address6: "fd00:9::2"},
+		"is the gateway6": {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Address6: "fd00:1::1"},
+		"subnet anycast":  {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Address6: "fd00:1::"},
+		"not an address":  {Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:02", Address6: "nope"},
+	}
+	for name, j := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := plan6(State{Claims: []Claim{}}, 1, j); err == nil {
+				t.Fatalf("%s admitted", name)
+			}
+		})
+	}
+}
+
+func TestAddress6AdmittedAndRecorded(t *testing.T) {
+	p, err := plan6(State{Claims: []Claim{}}, 1, v6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Address6 != netip.MustParseAddr("fd00:1::2") {
+		t.Fatalf("address6 %s", p.Address6)
+	}
+	v4only, err := plan6(State{Claims: []Claim{}}, 2, wire.Join{Network: "a", Address: "10.254.1.3", MAC: "02:00:00:00:00:03"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v4only.Address6.IsValid() {
+		t.Fatal("join without address6 got one")
+	}
+}
+
+func TestAddress6Clash(t *testing.T) {
+	s := State{Claims: []Claim{}}
+	p, err := Plan(s, nets6(), 1000, "c", 1, []wire.Join{v6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = s.Add(p)
+	other := v6
+	other.Address = "10.254.1.3"
+	other.MAC = "02:00:00:00:00:03"
+	if _, err := Plan(s, nets6(), 1000, "d", 2, []wire.Join{other}); err == nil {
+		t.Fatal("duplicate address6 from another netns admitted")
+	}
+}
+
+func TestAddress6RetryMustMatch(t *testing.T) {
+	s := State{Claims: []Claim{}}
+	p, err := Plan(s, nets6(), 1000, "c", 1, []wire.Join{v6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = s.Add(p)
+	again, err := Plan(s, nets6(), 1000, "c", 1, []wire.Join{v6})
+	if err != nil || !again[0].Existing {
+		t.Fatalf("same retry not Existing: %v", err)
+	}
+	noV6 := v6
+	noV6.Address6 = ""
+	if _, err := Plan(s, nets6(), 1000, "c", 1, []wire.Join{noV6}); err == nil {
+		t.Fatal("retry that drops address6 admitted")
+	}
+}

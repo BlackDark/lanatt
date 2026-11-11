@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -48,5 +49,17 @@ func TestLinkAddArgsPerDriver(t *testing.T) {
 	ipv := strings.Join(linkAddArgs(config.Network{Parent: "eth0", Driver: config.DriverIPvlan}, p, "lt1"), " ")
 	if ipv != "link add link eth0 name lt1 type ipvlan mode l2" {
 		t.Errorf("ipvlan: %s", ipv)
+	}
+}
+
+func TestIPv6SysctlsPerNetwork(t *testing.T) {
+	v4 := config.Network{}
+	if got := ipv6Sysctls(v4); len(got) != 1 || got[0] != [2]string{"disable_ipv6", "1"} {
+		t.Errorf("IPv4-only: %v", got)
+	}
+	dual := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64")}
+	want := [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
+	if got := ipv6Sysctls(dual); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("dual-stack: %v", got)
 	}
 }
