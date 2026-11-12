@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/netip"
 	"os"
@@ -109,24 +110,45 @@ func removeOwned(rec claims.Pending, ns *os.File) (bool, error) {
 
 // openNetns opens the netns with inode ino through any reference: a process in it, an fd to it,
 // or an nsfs mount of it. Each fd is checked after open, since a pid can exit and be reused.
+// A probe that fails for any reason but a vanished pid or path is an error, not absence.
 func openNetns(ino uint64) (*os.File, error) {
-	pids := procPids()
+	pids, err := procPids()
+	if err != nil {
+		return nil, err
+	}
 	for _, pid := range pids {
-		if f, ok := openIfNetns(fmt.Sprintf("/proc/%d/ns/net", pid), ino); ok {
+		f, ok, err := openIfNetns(fmt.Sprintf("/proc/%d/ns/net", pid), ino)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			return f, nil
 		}
 	}
 	for _, pid := range pids {
 		fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
-		if err != nil {
+		if gone(err) {
 			continue
+		} else if err != nil {
+			return nil, err
 		}
 		for _, fd := range fds {
 			path := fmt.Sprintf("/proc/%d/fd/%s", pid, fd.Name())
-			if target, err := os.Readlink(path); err == nil && target == fmt.Sprintf("net:[%d]", ino) {
-				if f, ok := openIfNetns(path, ino); ok {
-					return f, nil
-				}
+			target, err := os.Readlink(path)
+			if gone(err) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
+			if target != fmt.Sprintf("net:[%d]", ino) {
+				continue
+			}
+			f, ok, err := openIfNetns(path, ino)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				return f, nil
 			}
 		}
 	}
@@ -135,31 +157,43 @@ func openNetns(ino uint64) (*os.File, error) {
 		return nil, err
 	}
 	for _, m := range mounts {
-		if f, ok := openIfNetns(m, ino); ok {
+		f, ok, err := openIfNetns(m, ino)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			return f, nil
 		}
 	}
 	return nil, errNoReference
 }
 
+// gone reports whether err means the path vanished, as for an exited pid or closed fd.
+func gone(err error) bool {
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 // openIfNetns opens path and reports whether it is the netns ino.
-func openIfNetns(path string, ino uint64) (*os.File, bool) {
+func openIfNetns(path string, ino uint64) (*os.File, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, false
+		if gone(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	if key, err := fileNsID(f); err == nil && key.ino == ino {
-		return f, true
+		return f, true, nil
 	}
 	f.Close()
-	return nil, false
+	return nil, false, nil
 }
 
 // procPids lists the numeric entries of /proc.
-func procPids() []int {
+func procPids() ([]int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var pids []int
 	for _, e := range entries {
@@ -167,7 +201,7 @@ func procPids() []int {
 			pids = append(pids, pid)
 		}
 	}
-	return pids
+	return pids, nil
 }
 
 // nsfsMounts lists the mount points of nsfs filesystems, which bind-mount netns.
