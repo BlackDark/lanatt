@@ -33,6 +33,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - Attachments on a network with `prefix6` get the static `address6` lanatt adds, and no RA-derived addresses or routes. A join that omits `address6` gets no static address. Each still has an automatic IPv6 link-local address (`fe80::`), which lanatt does not manage. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them, unless the network sets `noSLAAC`.
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
 - On start, host devices named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
+- Each device is marked with the alias `lanatt:<token>`. A device whose removal could not be verified keeps a `pending` record in the state file until a later start, stop, or attach that conflicts with it removes it. A record from an earlier boot is retired without a removal attempt. A record is never dropped on owner exit alone. See ADR-0007.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
 
 The daemon calls `/usr/sbin/ip` and `/usr/bin/nsenter`.
@@ -56,9 +57,18 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - `interface` defaults to `lan0`, `lan1`, … in list order.
 - `address6` (optional, needs `prefix6`) adds a static IPv6 address in `prefix6`. Clash rules are the same as for `address`. A hook that sends `address6` needs a daemon from the release that added it: an older daemon refuses the unknown field.
 - `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. The replaced route keeps its metric. A v6 replace needs `gateway6` and `address6`. If the join fails after a default changed, the previous default is put back best effort, and a failed restore is logged. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
-- A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and nothing is left behind.
+- A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and its device is removed.
 - IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
-- A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) leaves no device behind. Its claims are dropped too, unless a failed state save keeps one until its owner exits. Retrying is safe.
+- A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) removes its devices and drops its claims. A device it cannot verify as removed keeps its `pending` record, and the attach error names it with the removal error. Retrying is safe: a retry that conflicts with a pending record tries its removal first, and is refused while that removal fails.
+- If the state file cannot be saved after a device changed, the daemon refuses attaches until a save succeeds.
+
+Recovery for a `pending` record that cannot be removed automatically, for example because its netns has no process left:
+
+1. Stop the daemon.
+2. Confirm the device is gone: no link with alias `lanatt:<token>` in the netns, and no host link named as the record's `temp`.
+3. Remove that entry from `pending` in the state file, then start the daemon.
+
+Do not remove a record while its device exists: a later attach could then reuse its address or MAC.
 - The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on the parent that attachment was made on, even if its network has been edited or removed since. A claim saved before parents were recorded has no known parent, so it blocks its MAC on every parent.
 
 ## Debugging claims
