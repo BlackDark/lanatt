@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +32,7 @@ func intendOne(t *testing.T, s *Server, id, addr, mac string, netns uint64) (cla
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err := s.intend(p[0], 0)
+	rec, err := s.intend(p[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,10 +53,10 @@ func TestOwnedNameMatchesOnlyOwnToken(t *testing.T) {
 	}
 }
 
-func TestOwnedNameHostMatchesTempWithoutAlias(t *testing.T) {
+func TestOwnedNameRequiresAliasForTemporaryLink(t *testing.T) {
 	out := `[{"ifname":"lt0000000102","ifalias":""},{"ifname":"lt0000000103","ifalias":"lanatt:x"}]`
-	if name, ok, _ := ownedName(out, "tok", "lt0000000102"); !ok || name != "lt0000000102" {
-		t.Fatalf("temp without alias: %q %v", name, ok)
+	if _, ok, err := ownedName(out, "tok", "lt0000000102"); ok || err == nil {
+		t.Fatalf("unmarked link: match %v, err %v", ok, err)
 	}
 	if _, ok, _ := ownedName(out, "tok", "lt0000000103"); ok {
 		t.Fatal("temp name with another token's alias matched")
@@ -69,11 +68,8 @@ func TestAbortKeepsRecordWhenRemovalFails(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	if err := s.settle(p); err != nil {
-		t.Fatal(err)
-	}
 	cause := errors.New("network \"a\": boom")
-	err := s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, cause)
+	err := s.abort(nil, []joinedPlan{{rec: rec}}, cause)
 	if err == nil || !strings.Contains(err.Error(), cause.Error()) || !strings.Contains(err.Error(), "delete refused") {
 		t.Fatalf("abort error %v: want both cause and cleanup failure", err)
 	}
@@ -97,7 +93,7 @@ func TestRetryAfterRemovalFailureReportsNotJoined(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errors.New("boom"))
+	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
 	s.finish(1, []claims.Planned{p})
 	// Same netns, same address: the failed join must not look already joined.
 	if _, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"}); err == nil {
@@ -113,7 +109,7 @@ func TestRetrySucceedsOnceRemovalVerified(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errors.New("boom"))
+	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
 	s.finish(1, []claims.Planned{p})
 
 	s.remove = goneRemove(&calls)
@@ -129,8 +125,8 @@ func TestRecordSurvivesRestartUntilVerified(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errors.New("boom"))
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
 
 	// A new daemon loads the state file: the record must still be there.
 	st, err := claims.Load(s.cfg.State)
@@ -155,8 +151,8 @@ func TestEarlierBootRecordRetiredWithoutRemoval(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errors.New("boom"))
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
 	calls = 0
 
 	restarted := &Server{cfg: s.cfg, boot: "new-boot", state: s.state}
@@ -177,7 +173,7 @@ func TestDetachKeepsUnverifiedRecord(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errors.New("boom"))
+	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
 	s.finish(1, []claims.Planned{p})
 
 	if err := s.detach(1000, "c1"); err == nil {
@@ -206,7 +202,7 @@ func TestIntendRefusedWithoutDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.cfg.State = filepath.Join(blocker, "claims.json")
-	if _, err := s.intend(p[0], 0); err == nil {
+	if _, err := s.intend(p[0]); err == nil {
 		t.Fatal("intent recorded into a blocked directory")
 	}
 	if len(s.state.Pending) != 0 {
@@ -217,7 +213,7 @@ func TestIntendRefusedWithoutDevice(t *testing.T) {
 func TestSaveFailureDegradesUntilSaved(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
-	s.remove = failingRemove(&calls)
+	s.remove = goneRemove(&calls)
 	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 
 	blocker := filepath.Join(t.TempDir(), "blocker")
@@ -226,12 +222,16 @@ func TestSaveFailureDegradesUntilSaved(t *testing.T) {
 	}
 	good := s.cfg.State
 	s.cfg.State = filepath.Join(blocker, "claims.json")
-	s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errors.New("boom"))
+	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
 	if !s.degraded {
 		t.Fatal("refused save did not degrade the server")
 	}
-	if calls != 0 {
-		t.Fatalf("device removed although the save of its claim-less state failed: %d", calls)
+	if calls != 1 {
+		t.Fatalf("cleanup should run using the durable intent: %d calls", calls)
+	}
+	saved, err := claims.Load(good)
+	if err != nil || !saved.HasPending(p.Netns, p.Network) {
+		t.Fatalf("last durable intent was lost: %v, %v", saved, err)
 	}
 	s.finish(1, []claims.Planned{p})
 	other := attachReqOn("b", "c2", "10.254.2.2", "02:00:00:00:00:09")
@@ -248,31 +248,26 @@ func TestSaveFailureDegradesUntilSaved(t *testing.T) {
 	}
 }
 
-func TestSettleKeepsRecordUntilComplete(t *testing.T) {
+func TestCompleteReplacesDurableIntentWithClaim(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
 	p, _ := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	if err := s.settle(p); err != nil {
-		t.Fatal(err)
-	}
 	if len(s.state.Claims) != 0 || len(s.state.Pending) != 1 {
-		t.Fatalf("after settle: claims %v pending %v", s.state.Claims, s.state.Pending)
+		t.Fatalf("before complete: claims %v pending %v", s.state.Claims, s.state.Pending)
 	}
 	if err := s.complete(1, []claims.Planned{p}); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.state.Claims) != 1 || len(s.state.Pending) != 0 {
-		t.Fatalf("after complete: claims %v pending %v", s.state.Claims, s.state.Pending)
+	saved, err := claims.Load(s.cfg.State)
+	if err != nil || len(saved.Claims) != 1 || len(saved.Pending) != 0 {
+		t.Fatalf("after complete: claims %v pending %v, load error %v", saved.Claims, saved.Pending, err)
 	}
 }
 
 func TestCompleteSaveFailureKeepsRecord(t *testing.T) {
 	s := reserveServer(t)
 	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	if err := s.settle(p); err != nil {
-		t.Fatal(err)
-	}
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -293,7 +288,7 @@ func TestIntendTokensAreDistinct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.intend(q[0], 0)
+	b, err := s.intend(q[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,8 +302,9 @@ func TestRetireRefusesConcurrentRemoval(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	if !s.claimRetire(rec) {
-		t.Fatal("first claim refused")
+	s.finish(1, nil)
+	if started, err := s.claimRetire(rec); !started || err != nil {
+		t.Fatalf("first retirement refused: %v", err)
 	}
 	if err := s.retire([]claims.Pending{rec}); err == nil {
 		t.Fatal("retire ran while another removal of the record was in progress")
@@ -328,7 +324,9 @@ func TestReserveRefusedWhileConflictRetires(t *testing.T) {
 	s.remove = failingRemove(&calls)
 	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	s.finish(1, nil)
-	s.claimRetire(rec)
+	if started, err := s.claimRetire(rec); !started || err != nil {
+		t.Fatalf("first retirement refused: %v", err)
+	}
 	if _, err := s.reserve(1000, attachReq("c2", "10.254.1.2", "02:00:00:00:00:04"), target{netns: 2, start: "1"}); err == nil {
 		t.Fatal("attach admitted over a record whose removal is running")
 	}
@@ -345,21 +343,19 @@ func TestParseNsfsMountsPicksNetnsBinds(t *testing.T) {
 	}
 }
 
-func TestNoReferenceMeansAbsentNetns(t *testing.T) {
-	pids, err := procPids()
-	if err != nil {
-		t.Skip("needs linux /proc")
-	}
-	// A live pid we cannot read is an error by design; the test needs root (as on the VM).
-	for _, pid := range pids {
-		if f, err := os.Open(fmt.Sprintf("/proc/%d/ns/net", pid)); err != nil {
-			t.Skipf("needs read access to every /proc/<pid>/ns/net: %v", err)
-		} else {
-			f.Close()
+func TestRetireSkipsStaleSnapshot(t *testing.T) {
+	s := reserveServer(t)
+	var calls int
+	s.remove = goneRemove(&calls)
+	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	s.finish(1, []claims.Planned{p})
+	for range 2 {
+		if err := s.retire([]claims.Pending{rec}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if _, err := openNetns(^uint64(0)); !errors.Is(err, errNoReference) {
-		t.Fatalf("unreferenced netns: %v, want errNoReference", err)
+	if calls != 1 {
+		t.Fatalf("want one removal, got %d", calls)
 	}
 }
 
@@ -367,10 +363,7 @@ func TestDetachMidAttachLeavesNoClaim(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	if err := s.settle(p); err != nil {
-		t.Fatal(err)
-	}
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	if err := s.detach(1000, "c1"); err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +371,7 @@ func TestDetachMidAttachLeavesNoClaim(t *testing.T) {
 	if len(s.state.Claims) != 0 || !s.state.HasPending(1, "a") {
 		t.Fatalf("after stop: claims %v pending %v", s.state.Claims, s.state.Pending)
 	}
-	if err := s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errCancelled); err == nil {
+	if err := s.abort(nil, []joinedPlan{{rec: rec}}, errCancelled); err == nil {
 		t.Fatal("abort reported clean with an unverified device")
 	}
 	if len(s.state.Claims) != 0 || !s.state.HasPending(1, "a") {

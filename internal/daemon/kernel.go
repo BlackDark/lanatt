@@ -7,7 +7,6 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
@@ -41,39 +40,6 @@ func DecideRoute(hasDefault, wantDefault bool) RouteAction {
 	default:
 		return RouteAdd
 	}
-}
-
-var tempName = regexp.MustCompile(`^lt[0-9a-f]{8}[0-9]+$`)
-
-// StaleTemps picks lanatt's temporary devices out of `ip -o link show`. On the host, any such
-// device was left by a crash between create and move.
-func StaleTemps(out string) []string {
-	var names []string
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 {
-			continue
-		}
-		name, _, _ := strings.Cut(strings.TrimSuffix(f[1], ":"), "@")
-		if tempName.MatchString(name) {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-// reapTemps deletes temporary devices a crashed daemon left on the host, of any driver.
-func reapTemps() error {
-	out, err := run(nil, ipBin, "-o", "link", "show")
-	if err != nil {
-		return err
-	}
-	for _, name := range StaleTemps(out) {
-		if _, err := run(nil, ipBin, "link", "del", "dev", name); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // join creates the device on the host under tmp, marks it with token, moves it into the netns,

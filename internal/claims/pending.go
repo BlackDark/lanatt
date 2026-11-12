@@ -4,8 +4,7 @@ package claims
 // is created and removed only once the device's absence is verified (ADR-0007).
 type Pending struct {
 	Claim
-	// Token is the device's alias, set after creation. A device without it is not ours. Random per
-	// attach, 32 bits: a collision would let a retire drop the wrong record.
+	// Token is a random per-device marker recorded in the link alias after creation.
 	Token string `json:"token"`
 	// Temp is the host-side name the device was created under, before it moved into the netns.
 	Temp string `json:"temp"`

@@ -32,7 +32,6 @@ lanatt daemon -config /etc/lanatt/config.json
 - `prefix6` (optional) turns on IPv6 for the network. It must be a `/48` to `/64` inside `fd00::/8` (ULA). A global prefix needs `allowGlobal6: true`. Two networks on one `parent` cannot have overlapping `prefix6`. `gateway6` (optional) must be a host address in `prefix6`. Without `prefix6`, `gateway6` and `allowGlobal6` are refused. See ADR-0012.
 - Attachments on a network with `prefix6` get the static `address6` lanatt adds, and no RA-derived addresses or routes. A join that omits `address6` gets no static address. Each still has an automatic IPv6 link-local address (`fe80::`), which lanatt does not manage. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them, unless the network sets `noSLAAC`.
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
-- On start, host devices named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - Each device is marked with the alias `lanatt:<token>`. A device whose removal could not be verified keeps a `pending` record in the state file until a later start, stop, or attach that conflicts with it removes it. A record from an earlier boot is retired without a removal attempt. A record is never dropped on owner exit alone. See ADR-0007.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
 
@@ -59,9 +58,8 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. The replaced route keeps its metric. A v6 replace needs `gateway6` and `address6`. If the join fails after a default changed, the previous default is put back best effort, and a failed restore is logged. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
 - A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and its device is removed.
 - IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
-- A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) removes its devices and drops its claims. A device it cannot verify as removed keeps its `pending` record, and the attach error names it with the removal error. Retrying is safe: a retry that conflicts with a pending record tries its removal first, and is refused while that removal fails.
-- If the state file cannot be saved after a device changed, the daemon refuses attaches until a save succeeds.
-- A netns with no visible reference (no task in it, open fd, or nsfs bind mount found by the scan) is taken as destroyed, and its devices went with it. The record is dropped on the next start, stop, or conflicting attach. A scan that keeps racing with exiting tasks keeps the record. The gap: a netns the kernel still holds with no visible reference (for example sockets in TIME_WAIT) keeps its device, and its address, until the kernel frees it. A conflicting attach can be admitted in that window.
+- A failed attach rolls back its new joins. Each device whose removal cannot be verified keeps a `pending` record. The daemon retries on startup, matching stop, or a conflicting attach. A conflicting attach is refused while cleanup is pending.
+- If the daemon cannot save state after verifying removal, it refuses further attaches until a save succeeds.
 - The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on the parent that attachment was made on, even if its network has been edited or removed since. A claim saved before parents were recorded has no known parent, so it blocks its MAC on every parent.
 
 ## Debugging claims
@@ -82,6 +80,12 @@ b7fbce2bed23  1001  lan      10.0.1.52  02:42:0a:00:01:34  lan0   4026532505  pr
 - `OWNER` is `pid/comm` of the owner while it is alive, a bare pid if its name cannot be read, or `none` when the claim is dead.
 - `REASON` is why a claim is dead: `other boot`, `owner gone`, `owner pid reused`, `netns changed`, or `no owner recorded`. `-` when alive.
 - `-json` prints an array of claim objects with every claim field (`id`, `uid`, `netns`, `network`, `parent`, `address`, `address6`, `mac`, `interface`, `boot_id`, `owner_pid`, `owner_start`), plus `alive`, `reason` (empty when alive) and `owner_comm`. The table's short id and labels are not used. An empty state prints `[]`.
+
+## Recovering pending cleanup
+
+Inspect the configured state file as root. Its `pending` entries include the boot ID, namespace inode, network, interface, parent, addresses, MAC, temporary host name and token. Use `ip -d link show` on the host and in the recorded namespace, if you can still reach it, to look for the `lanatt:<token>` alias. If you can verify the marked device and remove it, retry the original operation or restart the daemon so it can verify absence and clear the record.
+
+If the daemon cannot reach the namespace or finds an unmarked temporary link, the reservation stays in place. An exited owner or a search that finds no namespace reference is insufficient evidence to release it. If you independently verify that the original device is gone, stop the daemon, back up the state file, remove only that token's entry from `pending`, preserve the file's ownership and permissions, then restart the daemon. If you cannot verify removal, leave the record in place. A reboot destroys the devices and retires any earlier-boot records that remain on disk.
 
 ## Container image
 

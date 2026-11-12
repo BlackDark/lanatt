@@ -4,29 +4,21 @@ A claim records the UID that made it. A stop hook drops only that UID's claims f
 
 A claim also records its owner: the attach request's pid, that pid's start time, and the boot id. It is live only if the boot id matches, the owner pid still has the same start time, and the owner is still in the claim's netns. An inode match alone is not enough, because an unrelated workload can land on a reused inode and make a dead claim look live. Claims without an owner, such as those saved before this rule, are dropped on the first start.
 
-State lives under `/run/lanatt` (tmpfs). Attachments do not survive a reboot, so claims must not either; the owner check guards the cases where a reboot is not involved. Each join is saved as soon as it succeeds, so an attachment in a netns always has a claim.
-
-On start, lanatt deletes host devices that carry its temporary name, `lt<8 hex><n>`. Such a device exists only if the daemon died between creating it and moving it into the netns. A config with an empty allowlist fails at load, because that daemon would refuse every caller.
+State lives under `/run/lanatt` (tmpfs). Attachments do not survive a reboot, so claims must not either. The owner check handles exits and PID reuse within a boot.
 
 ## Cleanup-pending records
 
-A device whose removal is not verified is not a claim: it is a `pending` record. Each record holds the claim's reservation (netns, network, address, address6, MAC, parent), the attach's token and the device's temporary host name. The token is the device's alias, `lanatt:<token>`, set after creation. A device with that alias is ours. On the host, a device named as the record's temp name (`lt<token><i>`) with no other alias is ours too: the name carries the token, and only the host has that name, since the device is renamed on move.
+Each device has a pending record before creation. The record reserves its netns, network addresses and MAC on the recorded parent. It also stores its temporary host name and a random per-device token. The daemon sets the link alias to `lanatt:<token>` before moving the device into the workload namespace. An unmarked link at the temporary name is ambiguous: the daemon may have crashed before setting its alias, or creation may have failed because the name was already taken. The record stays pending in that case. Startup no longer deletes links based on the temporary naming pattern.
 
-Transitions, each saved before the next step:
+- Intent: save each record before creating its device. A failed save refuses creation.
+- Complete: after every join succeeds, one save publishes all new claims and drops their pending records. A restart before this save finds pending records without completed claims for the incomplete attach.
+- Abort: after a join or completion fails, restore any changed default routes and attempt deletion in reverse join order using the saved intents. Return the original failure along with any cleanup or save error.
+- Retry: startup retries all pending records, stop retries records for its container, and attach retries conflicting records before admitting a request. An active attach owns its pending records until it finishes.
+- Retirement: drop the record after deleting the marked link or verifying its absence in the host and target namespaces. Drop earlier-boot records because their devices cannot survive a reboot.
 
-- Intent: a record is saved before the device is created. A refused save creates nothing.
-- Settle: one save adds the claim and drops the record. The claim now finds the device.
-- Abort (failed attach or stop during one): one save drops the claims and keeps or re-adds the records of the joined devices. If that save fails, nothing is removed: the devices stay up under their records. Otherwise each device is removed by token, in the host namespace and then in its netns, with the kernel work outside the lock. The record goes only once the device is verified absent.
-- Retry: a record conflicting with an attach (same netns, or same address, address6 or MAC on its parent) is retried first. A stop retries the records of its container; start retries all.
-- Retirement: a record from an earlier boot is dropped without a removal attempt; the reboot took its netns.
+Recovery searches for the target namespace through tasks, open descriptors and nsfs bind mounts. If inspection cannot reach the namespace and the host check did not find and delete the marked device, the record keeps its reservation. A search can miss live references, including references held only by the kernel. An owner exit cannot verify device removal.
 
-A record is verified absent when no device carries its token in the host namespace or in its netns, and the scan finds no visible reference to the netns: no task in it, no fd to it, and no nsfs bind mount in any task's mount namespace. A scan that finds none is taken as destroyed: the devices went with it. A task exiting mid-scan retries the scan, and a scan that keeps racing keeps the record. Owner exit alone proves nothing; the scan does not look at the owner.
-
-Known gap: the kernel can hold a netns with no visible reference (for example TIME_WAIT sockets). Its device, and address, survive until freed, and a conflicting attach in that window can be admitted. Accepted: no check here can see that reference, and waiting on a timer would only move the window.
-
-If a save fails after a device changed, memory keeps the change, and attaches are refused until a save succeeds.
-
-Tests cover: removal failure keeps the record and reservation, retry after a verified removal, restart with a record, earlier-boot retirement, stop with an unverified record, a refused intent save, a degraded save, and settle dropping the record. `test/accept.sh` scenario 12 covers a join that fails after the device moved: its device is removed by token.
+If saving the removal of a pending record fails, the last durable state still contains the intent. The daemon refuses further attaches until it saves its updated state. See the [operator recovery procedure](../usage.md#recovering-pending-cleanup) for records that cannot be cleared automatically.
 
 ## Considered options
 
@@ -35,4 +27,4 @@ Tests cover: removal failure keeps the record and reservation, retry after a ver
 - Boot id only. Rejected: it does not catch reuse within one boot.
 - Boot id plus any process in the netns. Rejected: an unrelated process in a reused netns still passes.
 - Detach by container id alone. Rejected: callers pick the id, so one user could name another's.
-- Leave stray temporary devices for the administrator. Rejected: each holds a MAC on the parent and nothing else ever removes it.
+- Delete every host link that matches the temporary naming pattern. Rejected: the name alone cannot establish ownership.
