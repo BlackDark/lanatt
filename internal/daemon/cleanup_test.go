@@ -92,9 +92,9 @@ func TestRetryAfterRemovalFailureReportsNotJoined(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
-	s.finish(1, []claims.Planned{p})
+	s.finish(1)
 	// Same netns, same address: the failed join must not look already joined.
 	if _, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"}); err == nil {
 		t.Fatal("retry admitted over an unremoved device")
@@ -108,9 +108,9 @@ func TestRetrySucceedsOnceRemovalVerified(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
-	s.finish(1, []claims.Planned{p})
+	s.finish(1)
 
 	s.remove = goneRemove(&calls)
 	if _, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"}); err != nil {
@@ -172,9 +172,9 @@ func TestDetachKeepsUnverifiedRecord(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	s.abort(nil, []joinedPlan{{rec: rec}}, errors.New("boom"))
-	s.finish(1, []claims.Planned{p})
+	s.finish(1)
 
 	if err := s.detach(1000, "c1"); err == nil {
 		t.Fatal("stop reported clean with an unverified device")
@@ -196,8 +196,8 @@ func TestPendingAddressSurvivesNetworkRename(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	const addr = "10.254.1.2"
-	p, _ := intendOne(t, s, "c1", addr, "02:00:00:00:00:02", 1)
-	s.finish(1, []claims.Planned{p})
+	intendOne(t, s, "c1", addr, "02:00:00:00:00:02", 1)
+	s.finish(1)
 	renamed := s.cfg.Networks["a"]
 	delete(s.cfg.Networks, "a")
 	renamed.Name = "renamed"
@@ -251,7 +251,7 @@ func TestSaveFailureDegradesUntilSaved(t *testing.T) {
 	if err != nil || !saved.HasPending(p.Netns, p.Network) {
 		t.Fatalf("last durable intent was lost: %v, %v", saved, err)
 	}
-	s.finish(1, []claims.Planned{p})
+	s.finish(1)
 	other := attachReqOn("b", "c2", "10.254.2.2", "02:00:00:00:00:09")
 	if _, err := s.reserve(1000, other, target{netns: 2, start: "1"}); err == nil {
 		t.Fatal("degraded server admitted an attach")
@@ -270,11 +270,11 @@ func TestCompleteReplacesDurableIntentWithClaim(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
-	p, _ := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	if len(s.state.Claims) != 0 || len(s.state.Pending) != 1 {
 		t.Fatalf("before complete: claims %v pending %v", s.state.Claims, s.state.Pending)
 	}
-	if err := s.complete(1, []claims.Planned{p}); err != nil {
+	if err := s.complete(1); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := claims.Load(s.cfg.State)
@@ -285,13 +285,13 @@ func TestCompleteReplacesDurableIntentWithClaim(t *testing.T) {
 
 func TestCompleteSaveFailureKeepsRecord(t *testing.T) {
 	s := reserveServer(t)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s.cfg.State = filepath.Join(blocker, "claims.json")
-	if err := s.complete(1, []claims.Planned{p}); err == nil {
+	if err := s.complete(1); err == nil {
 		t.Fatal("complete succeeded into a blocked directory")
 	}
 	if len(s.state.Pending) != 1 || s.state.Pending[0].Token != rec.Token {
@@ -320,7 +320,7 @@ func TestRetireRefusesConcurrentRemoval(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.finish(1, nil)
+	s.finish(1)
 	if started, err := s.claimRetire(rec); !started || err != nil {
 		t.Fatalf("first retirement refused: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestReserveRefusedWhileConflictRetires(t *testing.T) {
 	var calls int
 	s.remove = failingRemove(&calls)
 	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.finish(1, nil)
+	s.finish(1)
 	if started, err := s.claimRetire(rec); !started || err != nil {
 		t.Fatalf("first retirement refused: %v", err)
 	}
@@ -365,8 +365,8 @@ func TestRetireSkipsStaleSnapshot(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = goneRemove(&calls)
-	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
-	s.finish(1, []claims.Planned{p})
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	s.finish(1)
 	for range 2 {
 		if err := s.retire([]claims.Pending{rec}); err != nil {
 			t.Fatal(err)
