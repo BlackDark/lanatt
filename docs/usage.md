@@ -21,6 +21,7 @@ lanatt daemon -config /etc/lanatt/config.json
 }
 ```
 
+- The file is one JSON object. Keys are case-sensitive and unknown keys are refused; trailing data after the object is refused.
 - `socket` and `state` default to the values above. `state` is on tmpfs: attachments do not survive a reboot, so claims must not either.
 - `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
 - `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
