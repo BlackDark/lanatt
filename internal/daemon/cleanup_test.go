@@ -191,6 +191,24 @@ func TestDetachKeepsUnverifiedRecord(t *testing.T) {
 	}
 }
 
+func TestPendingAddressSurvivesNetworkRename(t *testing.T) {
+	s := reserveServer(t)
+	var calls int
+	s.remove = failingRemove(&calls)
+	const addr = "10.254.1.2"
+	p, _ := intendOne(t, s, "c1", addr, "02:00:00:00:00:02", 1)
+	s.finish(1, []claims.Planned{p})
+	renamed := s.cfg.Networks["a"]
+	delete(s.cfg.Networks, "a")
+	renamed.Name = "renamed"
+	s.cfg.Networks[renamed.Name] = renamed
+
+	req := attachReqOn(renamed.Name, "c2", addr, "02:00:00:00:00:03")
+	if _, err := s.reserve(1000, req, target{netns: 2, start: "1"}); err == nil || calls != 1 {
+		t.Fatalf("renamed network should retry cleanup and refuse admission: %v, %d attempts", err, calls)
+	}
+}
+
 func TestIntendRefusedWithoutDevice(t *testing.T) {
 	s := reserveServer(t)
 	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})

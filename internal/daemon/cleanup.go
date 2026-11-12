@@ -211,9 +211,8 @@ func parseNsfsMounts(out string) []string {
 // mountInfoUnescaper undoes the octal escapes the kernel uses in mountinfo paths.
 var mountInfoUnescaper = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
 
-// conflicts reports whether rec holds something req would take: its netns, or its address or
-// MAC on the same network or parent. A field that does not parse conflicts with nothing; Plan
-// refuses it later.
+// conflicts checks namespace, addresses on the same network or parent, and MAC on the
+// same parent. A network can be renamed while its old device is still pending cleanup.
 func (s *Server) conflicts(rec claims.Pending, req wire.Request, netns uint64) bool {
 	if rec.Netns == netns {
 		return true
@@ -223,10 +222,11 @@ func (s *Server) conflicts(rec claims.Pending, req wire.Request, netns uint64) b
 		if !ok {
 			continue
 		}
-		if rec.Network == j.Network && (sameAddr(rec.Address, j.Address) || sameAddr(rec.Address6, j.Address6)) {
+		sameParent := rec.Parent == n.Parent
+		if (rec.Network == j.Network || sameParent) && (sameAddr(rec.Address, j.Address) || sameAddr(rec.Address6, j.Address6)) {
 			return true
 		}
-		if rec.MAC != "" && rec.Parent == n.Parent && sameMAC(rec.MAC, j.MAC) {
+		if rec.MAC != "" && sameParent && sameMAC(rec.MAC, j.MAC) {
 			return true
 		}
 	}
