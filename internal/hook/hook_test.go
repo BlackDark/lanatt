@@ -54,6 +54,10 @@ func TestBadInput(t *testing.T) {
 	if _, err := Request("create", strings.NewReader(state), bundle(misspelt)); err == nil {
 		t.Error("unknown join field accepted")
 	}
+	trailing := `{"io.lanatt.attachments":"[{\"network\":\"a\",\"address\":\"10.254.1.2\"}] []"}`
+	if _, err := Request("create", strings.NewReader(state), bundle(trailing)); err == nil {
+		t.Error("trailing data after the join array accepted")
+	}
 	if _, err := Request("start", strings.NewReader(state), bundle(`{}`)); err == nil {
 		t.Error("unknown stage accepted")
 	}

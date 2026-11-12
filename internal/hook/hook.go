@@ -47,12 +47,17 @@ func Request(stage string, stdin io.Reader, readFile func(string) ([]byte, error
 	if stage == "stop" {
 		return &wire.Request{Op: wire.OpDetach, ID: st.ID}, nil
 	}
-	// Strict: a misspelt field (say "ipv6") would otherwise join without it, silently.
+	// Strict: a misspelt field (say "ipv6") would otherwise join without it, silently. Trailing
+	// data would be ignored the same way, so the value must hold exactly one array.
 	var joins []wire.Join
 	dec := json.NewDecoder(strings.NewReader(value))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&joins); err != nil {
 		return nil, fmt.Errorf("annotation %s: %w", wire.AnnotationKey, err)
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("annotation %s: data after the join array", wire.AnnotationKey)
 	}
 	return &wire.Request{Op: wire.OpAttach, ID: st.ID, Pid: st.Pid, Joins: joins}, nil
 }
