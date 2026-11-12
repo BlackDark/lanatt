@@ -396,7 +396,7 @@ func (s *Server) abort(ns *os.File, joined []joinedPlan, cause error) error {
 	for i := len(joined) - 1; i >= 0; i-- {
 		j := joined[i]
 		if err := j.undo.restore(ns); err != nil {
-			log.Printf("restore defaults on %s: %v", j.plan.Interface, err)
+			errs = append(errs, err)
 		}
 		gone, err := s.removeDevice(j.rec, ns)
 		if !gone {
@@ -525,8 +525,11 @@ func (s *Server) detach(uid uint32, id string) error {
 			a.stopped = true
 		}
 	}
-	errs := []error{s.commit(s.state.Drop(uid, id))}
 	// Records of an attach still running are left to that attach.
+	if err := s.commit(s.state.Drop(uid, id)); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	var recs []claims.Pending
 	for _, rec := range s.state.Pending {
 		if rec.UID == uid && rec.ID == id && s.busy[rec.Netns] == nil {
@@ -534,8 +537,7 @@ func (s *Server) detach(uid uint32, id string) error {
 		}
 	}
 	s.mu.Unlock()
-	errs = append(errs, s.retire(recs))
-	return errors.Join(errs...)
+	return s.retire(recs)
 }
 
 // commit saves next and makes it the state. A refused save changes nothing.

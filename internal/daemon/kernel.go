@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -146,13 +145,15 @@ func configure(ns *os.File, n config.Network, p claims.Planned, tmp string) (und
 	}
 	undo = defaultUndo{dev: p.Interface, written: map[string][]string{}}
 	defer func() {
-		if err != nil {
-			// Restored here, so the caller must not restore them again.
-			if rerr := undo.restore(ns); rerr != nil {
-				log.Printf("restore defaults on %s: %v", p.Interface, rerr)
-			}
-			undo = defaultUndo{}
+		if err == nil {
+			return
 		}
+		// A failed restore keeps undo, so abort retries it and reports the error.
+		if rerr := undo.restore(ns); rerr != nil {
+			err = errors.Join(err, rerr)
+			return
+		}
+		undo = defaultUndo{}
 	}()
 	replaced, wrote, err := setDefault(ns, "-4", n.Gateway, p.Interface, p.Default)
 	if err != nil {

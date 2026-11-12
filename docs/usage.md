@@ -62,13 +62,14 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) removes its devices and drops its claims. A device it cannot verify as removed keeps its `pending` record, and the attach error names it with the removal error. Retrying is safe: a retry that conflicts with a pending record tries its removal first, and is refused while that removal fails.
 - If the state file cannot be saved after a device changed, the daemon refuses attaches until a save succeeds.
 
-Recovery for a `pending` record that cannot be removed automatically, for example because its netns has no process left:
+Recovery for a `pending` record that the daemon cannot remove, for example because its netns has no process left. The record's `netns` field is the netns inode `INO`:
 
-1. Stop the daemon.
-2. Confirm the device is gone: no link with alias `lanatt:<token>` in the netns, and no host link named as the record's `temp`.
-3. Remove that entry from `pending` in the state file, then start the daemon.
+1. Find what still holds the netns. A process in it: `find /proc/[0-9]*/ns/net -lname 'net:\[INO\]' 2>/dev/null`. An open fd: `find /proc/[0-9]*/fd -lname 'net:\[INO\]' 2>/dev/null`. A bind mount: `findmnt -t nsfs -n -o TARGET | while read -r m; do [ "$(stat -c %i "$m")" = INO ] && echo "$m"; done`.
+2. If any of these prints a path, the netns is alive. Enter it through that path with `nsenter --net=<path> ip -j link show` and look for alias `lanatt:<token>`. If the device is there, leave the record: the daemon removes it on the next start or stop.
+3. If none prints anything, the netns is destroyed and its devices went with it. Check the host too: `ip link show dev <temp>` must fail, where `<temp>` is the record's `temp`.
+4. Only then: stop the daemon, remove that entry from `pending` in the state file, start the daemon.
 
-Do not remove a record while its device exists: a later attach could then reuse its address or MAC.
+Do not remove a record while its device exists: a later attach could then reuse its address or MAC. Kernel-held references with no process, fd or mount (for example sockets in TIME_WAIT) are not visible here; a netns in that state looks destroyed to step 1 while it still exists.
 - The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on the parent that attachment was made on, even if its network has been edited or removed since. A claim saved before parents were recorded has no known parent, so it blocks its MAC on every parent.
 
 ## Debugging claims
