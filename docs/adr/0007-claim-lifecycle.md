@@ -20,6 +20,10 @@ Recovery searches for the target namespace through tasks, open descriptors and n
 
 If saving the removal of a pending record fails, the last durable state still contains the intent. The daemon refuses further attaches until it saves its updated state. See the [operator recovery procedure](../usage.md#recovering-pending-cleanup) for records that cannot be cleared automatically.
 
+## Attach timing
+
+Conflicting cleanup runs during admission, before the join budget starts. The socket deadline limits the client's wait. It does not cancel daemon work, so admission can continue retrying cleanup after the client times out. The Linux daemon tests exercise this through a real socket with two conflicting records.
+
 ## Considered options
 
 - Prune only on restart, as ADR-0006 alone says. Rejected: inode reuse lets a dead workload's claim pass as a live one.

@@ -75,7 +75,7 @@ func TestReserveHoldsAddressUntilFinished(t *testing.T) {
 	if _, err := s.reserve(1000, other, one); err == nil {
 		t.Fatal("second attach to a busy netns admitted")
 	}
-	s.finish(1, p)
+	s.finish(1)
 	if _, err := s.reserve(1000, attachReq("c2", "10.254.1.2", "02:00:00:00:00:03"), two); err != nil {
 		t.Fatalf("address not released by finish: %v", err)
 	}
@@ -83,15 +83,15 @@ func TestReserveHoldsAddressUntilFinished(t *testing.T) {
 
 func TestCompleteCommitsClaimAndDropsReservation(t *testing.T) {
 	s := reserveServer(t)
-	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
+	_, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.complete(1, p); err != nil {
+	if err := s.complete(1); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.pending) != 0 {
-		t.Fatalf("reservation left after complete: %v", s.pending)
+	if s.busy[1] != nil {
+		t.Fatalf("reservation left after complete: %v", s.busy[1])
 	}
 	saved, err := claims.Load(s.cfg.State)
 	if err != nil {
@@ -104,11 +104,11 @@ func TestCompleteCommitsClaimAndDropsReservation(t *testing.T) {
 
 func TestCompletedClaimKeepsAddress(t *testing.T) {
 	s := reserveServer(t)
-	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
+	_, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.complete(1, p); err != nil {
+	if err := s.complete(1); err != nil {
 		t.Fatal(err)
 	}
 	// Planned against the saved state directly: reserve would prune this fake owner first.
@@ -148,15 +148,15 @@ func TestDetachCancelsButKeepsReservationUntilFinish(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The device is still up: its address must stay held until the attach finishes.
-	if !slices.Contains(s.pending, p[0]) {
+	if s.busy[1] == nil || !slices.Contains(s.busy[1].plans, p[0]) {
 		t.Fatal("reservation dropped before the attach finished")
 	}
 	if len(s.state.Claims) != 0 {
 		t.Fatalf("claim committed after stop: %v", s.state.Claims)
 	}
-	s.finish(1, p)
-	if len(s.pending) != 0 {
-		t.Fatalf("reservation left after finish: %v", s.pending)
+	s.finish(1)
+	if s.busy[1] != nil {
+		t.Fatalf("reservation left after finish: %v", s.busy[1])
 	}
 }
 
@@ -172,10 +172,10 @@ func TestCompleteFailureKeepsReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.cfg.State = filepath.Join(blocker, "claims.json")
-	if err := s.complete(1, p); err == nil {
+	if err := s.complete(1); err == nil {
 		t.Fatal("complete saved into a blocked directory")
 	}
-	if !slices.Contains(s.pending, p[0]) {
+	if s.busy[1] == nil || !slices.Contains(s.busy[1].plans, p[0]) {
 		t.Fatal("reservation dropped before the claim was saved")
 	}
 }
@@ -189,10 +189,78 @@ func TestCompleteRefusesAfterStop(t *testing.T) {
 	if err := s.detach(1000, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.complete(1, p); err != errCancelled {
+	if err := s.complete(1); err != errCancelled {
 		t.Fatalf("complete after stop: %v, want errCancelled", err)
 	}
-	if !slices.Contains(s.pending, p[0]) {
+	if s.busy[1] == nil || !slices.Contains(s.busy[1].plans, p[0]) {
 		t.Fatal("refused attach released its reservation before its devices were undone")
+	}
+}
+
+func TestConcurrentReservationsHaveOneWinner(t *testing.T) {
+	for _, sameNetns := range []bool{true, false} {
+		name := "same address"
+		if sameNetns {
+			name = "same netns"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := reserveServer(t)
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			go func() {
+				<-start
+				_, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
+				results <- err
+			}()
+			go func() {
+				<-start
+				req := attachReq("c2", "10.254.1.2", "02:00:00:00:00:03")
+				netns := uint64(2)
+				if sameNetns {
+					req = attachReqOn("b", "c2", "10.254.2.2", "02:00:00:00:00:03")
+					netns = 1
+				}
+				_, err := s.reserve(1000, req, target{netns: netns, start: "1"})
+				results <- err
+			}()
+			close(start)
+			first, second := <-results, <-results
+			if (first == nil) == (second == nil) {
+				t.Fatalf("want exactly one reservation, got %v and %v", first, second)
+			}
+		})
+	}
+}
+
+func TestStopRacingCompleteLeavesNoClaim(t *testing.T) {
+	s := reserveServer(t)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	start := make(chan struct{})
+	completed, stopped := make(chan error, 1), make(chan error, 1)
+	go func() {
+		<-start
+		completed <- s.complete(1)
+	}()
+	go func() {
+		<-start
+		stopped <- s.detach(1000, "c1")
+	}()
+	close(start)
+	result := <-completed
+	if result != nil && result != errCancelled {
+		t.Fatal(result)
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	saved, err := claims.Load(s.cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Claims) != 0 {
+		t.Fatalf("stop left a completed claim: %v", saved.Claims)
+	}
+	if saved.HasPending(rec.Netns, rec.Network) != (result == errCancelled) {
+		t.Fatalf("complete returned %v, persisted pending %v", result, saved.Pending)
 	}
 }
