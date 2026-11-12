@@ -468,3 +468,89 @@ func TestRejoinIgnoresLegacyDuplicateMAC(t *testing.T) {
 		}
 	}
 }
+
+// netsOn parses networks given as name=parent pairs; prefixes are fixed per name.
+func netsOn(t *testing.T, pairs map[string]string) map[string]config.Network {
+	t.Helper()
+	prefix := map[string]string{"a": "10.254.1.0/28", "b": "10.254.2.0/28", "c": "10.254.3.0/28"}
+	gw := map[string]string{"a": "10.254.1.14", "b": "10.254.2.14", "c": "10.254.3.14"}
+	var parts []string
+	for name, parent := range pairs {
+		parts = append(parts, `{"name":"`+name+`","parent":"`+parent+`","prefix":"`+prefix[name]+`","gateway":"`+gw[name]+`","driver":"macvlan"}`)
+	}
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[` + strings.Join(parts, ",") + `]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Networks
+}
+
+func TestReparentedClaimStillBlocksOriginalParent(t *testing.T) {
+	s := admit(t, State{}, "c", 1, j1) // network a on d0
+	// The admin moves a to d1 and restarts; the live device is still on d0.
+	after := netsOn(t, map[string]string{"a": "d1", "b": "d0"})
+	if _, err := Plan(s, after, 1000, "d", 2, []wire.Join{{Network: "b", Address: "10.254.2.2", MAC: j1.MAC}}); err == nil {
+		t.Error("MAC on the original parent admitted after re-parent")
+	}
+	if _, err := Plan(s, after, 1000, "d", 2, []wire.Join{{Network: "a", Address: "10.254.1.3", MAC: j1.MAC}}); err != nil {
+		t.Errorf("MAC on the new parent refused: %v", err)
+	}
+}
+
+func TestRemovedNetworkKeepsRecordedParent(t *testing.T) {
+	s := admit(t, State{}, "c", 1, j1) // network a on d0
+	gone := netsOn(t, map[string]string{"b": "d0", "c": "d1"})
+	if _, err := Plan(s, gone, 1000, "d", 2, []wire.Join{{Network: "b", Address: "10.254.2.2", MAC: j1.MAC}}); err == nil {
+		t.Error("MAC of a removed network's claim did not block its parent")
+	}
+	if _, err := Plan(s, gone, 1000, "d", 2, []wire.Join{{Network: "c", Address: "10.254.3.2", MAC: j1.MAC}}); err != nil {
+		t.Errorf("removed network's claim blocked an unrelated parent: %v", err)
+	}
+}
+
+func TestLegacyClaimWithoutParentBlocksEveryParent(t *testing.T) {
+	legacy := `{"claims":[{"id":"c","uid":1000,"netns":1,"network":"a","address":"10.254.1.2","address6":"","mac":"02:00:00:00:00:02","interface":"lan0"}]}`
+	var s State
+	if err := json.Unmarshal([]byte(legacy), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Claims[0].Parent != "" {
+		t.Fatalf("legacy claim got parent %q", s.Claims[0].Parent)
+	}
+	for _, pair := range []map[string]string{{"a": "d0", "b": "d1"}, {"a": "d1", "b": "d0"}} {
+		_, err := Plan(s, netsOn(t, pair), 1000, "d", 2, []wire.Join{{Network: "b", Address: "10.254.2.2", MAC: j1.MAC}})
+		if err == nil {
+			t.Errorf("legacy MAC admitted with config %v", pair)
+		}
+	}
+}
+
+func TestRetryKeepsStoredParent(t *testing.T) {
+	s := admit(t, State{}, "c", 1, j1) // a on d0
+	p, err := Plan(s, netsOn(t, map[string]string{"a": "d1"}), 1000, "c", 1, []wire.Join{j1})
+	if err != nil {
+		t.Fatalf("retry after re-parent refused: %v", err)
+	}
+	if !p[0].Existing || p[0].Parent != "d0" {
+		t.Errorf("retry: existing=%v parent=%q, want existing on d0", p[0].Existing, p[0].Parent)
+	}
+}
+
+func TestLegacyRetryStaysExisting(t *testing.T) {
+	legacy := State{Claims: []Claim{{ID: "c", UID: 1000, Netns: 1, Network: "a", Address: netip.MustParseAddr("10.254.1.2"), MAC: j1.MAC, Interface: "lan0"}}}
+	p, err := Plan(legacy, nets(t), 1000, "c", 1, []wire.Join{j1})
+	if err != nil || !p[0].Existing || p[0].Parent != "" {
+		t.Errorf("legacy retry: existing=%v parent=%q err=%v", err == nil && p[0].Existing, p[0].Parent, err)
+	}
+}
+
+func TestClaimRecordsParentInJSON(t *testing.T) {
+	s := admit(t, State{}, "c", 1, j1)
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"parent":"d0"`) {
+		t.Errorf("parent not saved: %s", data)
+	}
+}

@@ -32,6 +32,32 @@ func attachReqOn(network, id, addr, mac string) wire.Request {
 	return wire.Request{Op: wire.OpAttach, ID: id, Pid: 1, Joins: []wire.Join{{Network: network, Address: addr, MAC: mac}}}
 }
 
+func TestPendingReservationKeepsParent(t *testing.T) {
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan"},
+		{"name":"c","parent":"d1","prefix":"10.254.3.0/28","gateway":"10.254.3.14","driver":"macvlan"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.State = filepath.Join(t.TempDir(), "claims.json")
+	s := &Server{cfg: cfg, boot: "boot"}
+	const mac = "02:00:00:00:00:02"
+	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", mac), target{netns: 1, start: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p[0].Parent != "d0" {
+		t.Fatalf("pending parent %q, want d0", p[0].Parent)
+	}
+	if _, err := s.reserve(1000, attachReqOn("b", "c2", "10.254.2.2", mac), target{netns: 2, start: "1"}); err == nil {
+		t.Error("MAC reserved on d0 admitted on the same parent")
+	}
+	if _, err := s.reserve(1000, attachReqOn("c", "c3", "10.254.3.2", mac), target{netns: 3, start: "1"}); err != nil {
+		t.Errorf("MAC reserved on d0 refused on d1: %v", err)
+	}
+}
+
 func TestReserveHoldsAddressUntilFinished(t *testing.T) {
 	s := reserveServer(t)
 	one := target{netns: 1, start: "1"}
