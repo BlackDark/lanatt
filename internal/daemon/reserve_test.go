@@ -93,9 +93,11 @@ func TestSettleCommitsClaimAndFinishDropsReservation(t *testing.T) {
 	if !slices.Contains(s.pending, p[0]) {
 		t.Fatal("settle dropped the reservation: the device is still up")
 	}
-	s.finish(1, p)
+	if err := s.complete(1, p); err != nil {
+		t.Fatal(err)
+	}
 	if len(s.pending) != 0 {
-		t.Fatalf("reservation left after finish: %v", s.pending)
+		t.Fatalf("reservation left after complete: %v", s.pending)
 	}
 	saved, err := claims.Load(s.cfg.State)
 	if err != nil {
@@ -115,7 +117,9 @@ func TestSettledClaimKeepsAddress(t *testing.T) {
 	if err := s.settle(p[0]); err != nil {
 		t.Fatal(err)
 	}
-	s.finish(1, p)
+	if err := s.complete(1, p); err != nil {
+		t.Fatal(err)
+	}
 	// Planned against the saved state directly: reserve would prune this fake owner first.
 	joins := attachReq("c2", "10.254.1.2", "02:00:00:00:00:03").Joins
 	if _, err := claims.Plan(s.state, s.cfg.Networks, 1000, "c2", 2, joins); err == nil {
@@ -177,7 +181,7 @@ func TestDetachCancelsButKeepsReservationUntilFinish(t *testing.T) {
 	}
 }
 
-func TestSettleFailureKeepsReservation(t *testing.T) {
+func TestCompleteFailureKeepsReservation(t *testing.T) {
 	s := reserveServer(t)
 	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
 	if err != nil {
@@ -189,8 +193,8 @@ func TestSettleFailureKeepsReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.cfg.State = filepath.Join(blocker, "claims.json")
-	if err := s.settle(p[0]); err == nil {
-		t.Fatal("settle saved into a blocked directory")
+	if err := s.complete(1, p); err == nil {
+		t.Fatal("complete saved into a blocked directory")
 	}
 	if !slices.Contains(s.pending, p[0]) {
 		t.Fatal("reservation dropped before the claim was saved")

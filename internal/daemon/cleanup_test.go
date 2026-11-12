@@ -256,7 +256,7 @@ func TestSettleKeepsRecordUntilComplete(t *testing.T) {
 	if err := s.settle(p); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.state.Claims) != 1 || len(s.state.Pending) != 1 {
+	if len(s.state.Claims) != 0 || len(s.state.Pending) != 1 {
 		t.Fatalf("after settle: claims %v pending %v", s.state.Claims, s.state.Pending)
 	}
 	if err := s.complete(1, []claims.Planned{p}); err != nil {
@@ -363,7 +363,7 @@ func TestNoReferenceMeansAbsentNetns(t *testing.T) {
 	}
 }
 
-func TestDetachKeepsClaimOfBusyNetns(t *testing.T) {
+func TestDetachMidAttachLeavesNoClaim(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
@@ -374,9 +374,9 @@ func TestDetachKeepsClaimOfBusyNetns(t *testing.T) {
 	if err := s.detach(1000, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	// The device is up until abort: its claim must not go before its record is written.
-	if len(s.state.Claims) != 1 {
-		t.Fatalf("detach dropped a busy claim: %v", s.state.Claims)
+	// The record stays for the attach to undo: the claim was never committed.
+	if len(s.state.Claims) != 0 || !s.state.HasPending(1, "a") {
+		t.Fatalf("after stop: claims %v pending %v", s.state.Claims, s.state.Pending)
 	}
 	if err := s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errCancelled); err == nil {
 		t.Fatal("abort reported clean with an unverified device")

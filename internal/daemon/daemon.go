@@ -243,7 +243,7 @@ func (s *Server) complete(netns uint64, plans []claims.Planned) error {
 	if a := s.busy[netns]; a != nil && a.stopped {
 		return errCancelled
 	}
-	next := s.state
+	next := s.state.Add(plans)
 	for _, p := range plans {
 		next = next.RemovePending(p.Netns, p.Network)
 	}
@@ -355,15 +355,15 @@ func (s *Server) active(p claims.Planned) bool {
 	return a != nil && !a.stopped && slices.Contains(s.pending, p)
 }
 
-// settle makes one join's claim durable. Its record stays until complete: an attach that fails
-// later must still find the device, even if the claim save is what failed.
+// settle checks that a join finished while its attach still runs. Nothing is saved: complete
+// commits the claims and drops the records in one save, so a restart mid-attach finds only devices.
 func (s *Server) settle(p claims.Planned) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.active(p) {
 		return errCancelled
 	}
-	return s.commit(s.state.Add([]claims.Planned{p}))
+	return nil
 }
 
 // intend records a device before it is created, so a crash or failed removal still finds it.
@@ -561,15 +561,8 @@ func (s *Server) detach(uid uint32, id string) error {
 			a.stopped = true
 		}
 	}
-	// Claims and records of a busy netns are left to its attach: abort forgets the claims and
-	// keeps the records in one save, so no claim is dropped while its device is up.
-	next := s.state.Drop(uid, id)
-	for _, c := range s.state.Claims {
-		if c.UID == uid && c.ID == id && s.busy[c.Netns] != nil {
-			next.Claims = append(next.Claims, c)
-		}
-	}
-	if err := s.commit(next); err != nil {
+	// Records of an attach still running are left to that attach.
+	if err := s.commit(s.state.Drop(uid, id)); err != nil {
 		s.mu.Unlock()
 		return err
 	}
