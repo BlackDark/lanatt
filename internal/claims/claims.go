@@ -76,7 +76,8 @@ func Plan(s State, nets map[string]config.Network, uid uint32, id string, netns 
 		if defaults > 1 {
 			return nil, errors.New("more than one join asks for the default route")
 		}
-		p, err := planOne(s, nets, uid, id, netns, j)
+		// Earlier joins of this request count as claims, so a MAC may not repeat on one parent in one request.
+		p, err := planOne(s.Add(plans), nets, uid, id, netns, j)
 		if err != nil {
 			return nil, fmt.Errorf("network %q: %w", j.Network, err)
 		}
@@ -128,10 +129,7 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 	}
 	want := Claim{ID: id, UID: uid, Netns: netns, Network: n.Name, Address: addr, Address6: addr6, MAC: mac, Interface: j.Interface}
 	for _, c := range s.Claims {
-		if c.Network != n.Name {
-			continue
-		}
-		if c.Netns == netns {
+		if c.Network == n.Name && c.Netns == netns {
 			if c.Address != addr || c.Address6 != addr6 || c.MAC != mac {
 				held := fmt.Sprintf("%s %s", c.Address, c.MAC)
 				if c.Address6.IsValid() {
@@ -144,17 +142,27 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 			}
 			return Planned{Claim: c, Default: j.Default, Existing: true}, nil
 		}
-		if c.Address == addr {
+	}
+	for _, c := range s.Claims {
+		if c.Network == n.Name && c.Address == addr {
 			return Planned{}, fmt.Errorf("address %s is taken by %s", addr, Holder(c))
 		}
-		if addr6.IsValid() && c.Address6 == addr6 {
+		if c.Network == n.Name && addr6.IsValid() && c.Address6 == addr6 {
 			return Planned{}, fmt.Errorf("address6 %s is taken by %s", addr6, Holder(c))
 		}
-		if mac != "" && c.MAC == mac {
+		// A MAC is unique on the segment, so the check spans every network on the parent.
+		if mac != "" && c.MAC == mac && mayShareParent(nets, c.Network, n.Parent) {
 			return Planned{}, fmt.Errorf("MAC %s is taken by %s", mac, Holder(c))
 		}
 	}
 	return Planned{Claim: want, Default: j.Default}, nil
+}
+
+// mayShareParent reports whether the named network may sit on parent. A claim on a network
+// no longer configured may still hold its MAC on its parent, so it counts.
+func mayShareParent(nets map[string]config.Network, name, parent string) bool {
+	n, ok := nets[name]
+	return !ok || n.Parent == parent
 }
 
 // planAddr6 checks an optional IPv6 address. Zero means the join asks for none.
@@ -261,9 +269,12 @@ func (s State) Prune(alive func(Claim) bool) (State, []Claim) {
 	return out, dropped
 }
 
-// Holder names a claim in a refusal, so the caller can find what holds the address.
+// Holder names a claim in a refusal, so the caller can find what holds the address or MAC.
 func Holder(c Claim) string {
-	s := fmt.Sprintf("claim %s (uid %d, netns %d, %s", ShortID(c.ID), c.UID, c.Netns, c.Interface)
+	s := fmt.Sprintf("claim %s (uid %d, netns %d, network %s", ShortID(c.ID), c.UID, c.Netns, c.Network)
+	if c.Interface != "" {
+		s += ", " + c.Interface
+	}
 	if c.OwnerPid > 0 {
 		s += fmt.Sprintf(", pid %d", c.OwnerPid)
 	}

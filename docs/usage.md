@@ -24,7 +24,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - `socket` and `state` default to the values above. `state` is on tmpfs: attachments do not survive a reboot, so claims must not either.
 - `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
 - `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
-- `driver` is `macvlan` (bridge mode, each attachment has its own MAC) or `ipvlan` (L2 mode, no MAC: attachments share the parent's). See ADR-0011. A parent carries one driver: macvlan and ipvlan networks cannot share a `parent`.
+- `driver` is `macvlan` (bridge mode, each attachment has its own MAC) or `ipvlan` (L2 mode, no MAC: attachments share the parent's). See ADR-0011. A parent carries one driver: macvlan and ipvlan networks cannot share a `parent`. A caller-chosen MAC must be unique among attachments on the same `parent`, whatever the network; a join that reuses one is refused.
 - Two networks on one `parent` cannot have overlapping `prefix`; a config that does is refused at load.
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
@@ -59,7 +59,7 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and nothing is left behind.
 - IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
 - A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) leaves no device behind. Its claims are dropped too, unless a failed state save keeps one until its owner exits. Retrying is safe.
-- The same join again is success. A different address, address6 or MAC for the same network and netns, or an address, address6 or MAC another netns holds on that network, is refused.
+- The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on any network of the same `parent`. A claim on a network no longer configured has no known parent, so it blocks its MAC on every parent.
 
 ## Debugging claims
 
