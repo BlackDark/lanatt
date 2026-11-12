@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 
@@ -48,5 +50,33 @@ func TestLinkAddArgsPerDriver(t *testing.T) {
 	ipv := strings.Join(linkAddArgs(config.Network{Parent: "eth0", Driver: config.DriverIPvlan}, p, "lt1"), " ")
 	if ipv != "link add link eth0 name lt1 type ipvlan mode l2" {
 		t.Errorf("ipvlan: %s", ipv)
+	}
+}
+
+func TestIPv6SysctlsPerNetwork(t *testing.T) {
+	v4 := config.Network{}
+	if got := ipv6Sysctls(v4); len(got) != 0 {
+		t.Errorf("IPv4-only: %v", got)
+	}
+	dual := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64")}
+	want := [][2]string{{"disable_ipv6", "0"}, {"accept_ra", "0"}, {"autoconf", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"}}
+	if got := ipv6Sysctls(dual); !slices.Equal(got, want) {
+		t.Errorf("dual-stack: %v", got)
+	}
+}
+
+func TestDADState(t *testing.T) {
+	addr := netip.MustParseAddr("2001:db8:77::20")
+	cases := map[string]struct{ out, want string }{
+		"preferred":  {"    inet6 2001:db8:77::20/64 scope global \n       valid_lft forever preferred_lft forever\n", ""},
+		"tentative":  {"    inet6 2001:db8:77::20/64 scope global tentative \n", "tentative"},
+		"dadfailed":  {"    inet6 2001:db8:77::20/64 scope global dadfailed tentative \n", "dadfailed"},
+		"other addr": {"    inet6 2001:db8:77::21/64 scope global dadfailed \n", "missing"},
+		"no output":  {"", "missing"},
+	}
+	for name, c := range cases {
+		if got := dadState(c.out, addr); got != c.want {
+			t.Errorf("%s: got %q want %q", name, got, c.want)
+		}
 	}
 }

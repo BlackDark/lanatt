@@ -95,3 +95,67 @@ func TestParseRefusesMixedDriversOnParent(t *testing.T) {
 		t.Fatal("macvlan and ipvlan on one parent admitted")
 	}
 }
+
+func TestParseRefusesOverlappingPrefix6OnParent(t *testing.T) {
+	_, err := Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:10::/64"},
+		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan","prefix6":"fd00:10::/48"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "overlaps") {
+		t.Fatalf("overlapping prefix6 on one parent: %v", err)
+	}
+	_, err = Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:10::/64"},
+		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan","prefix6":"fd00:11::/64"}]}`))
+	if err != nil {
+		t.Fatalf("disjoint prefix6 refused: %v", err)
+	}
+}
+
+func TestParseIPv6(t *testing.T) {
+	cfg, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:1::/64","gateway6":"fd00:1::1"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := cfg.Networks["lan"]
+	if !n.HasIPv6() || n.Prefix6.String() != "fd00:1::/64" || n.Gateway6.String() != "fd00:1::1" {
+		t.Fatalf("unexpected IPv6 %+v", n)
+	}
+	plain, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Networks["lan"].HasIPv6() {
+		t.Fatal("network without prefix6 has IPv6")
+	}
+}
+
+func TestParseIPv6Refuses(t *testing.T) {
+	base := `"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"`
+	cases := map[string]string{
+		"global without allowGlobal6":  `"prefix6":"2001:db8:1::/64"`,
+		"gateway6 without prefix6":     `"gateway6":"fd00:1::1"`,
+		"allowGlobal6 without prefix6": `"allowGlobal6":true`,
+		"shorter than /48":             `"prefix6":"fd00::/47"`,
+		"longer than /64":              `"prefix6":"fd00:1::/80"`,
+		"host bits":                    `"prefix6":"fd00:1::5/64"`,
+		"link-local":                   `"prefix6":"fe80::/64","allowGlobal6":true`,
+		"multicast":                    `"prefix6":"ff02::/64","allowGlobal6":true`,
+		"v4-mapped":                    `"prefix6":"::ffff:0:0/96"`,
+		"gateway6 outside":             `"prefix6":"fd00:1::/64","gateway6":"fd00:2::1"`,
+		"gateway6 anycast":             `"prefix6":"fd00:1::/64","gateway6":"fd00:1::"`,
+		"gateway6 is prefix":           `"prefix6":"fd00:1::/64","gateway6":"fd00:1::"`,
+	}
+	for name, extra := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(cfgWith("{" + base + "," + extra + "}"))); err == nil {
+				t.Fatalf("%s admitted", extra)
+			}
+		})
+	}
+}
+
+func TestParseIPv6GlobalWithAllowGlobal6(t *testing.T) {
+	if _, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"2001:db8:1::/64","allowGlobal6":true}`))); err != nil {
+		t.Fatal(err)
+	}
+}

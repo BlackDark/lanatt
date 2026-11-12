@@ -23,6 +23,7 @@ type Claim struct {
 	Netns     uint64     `json:"netns"`
 	Network   string     `json:"network"`
 	Address   netip.Addr `json:"address"`
+	Address6  netip.Addr `json:"address6"`
 	MAC       string     `json:"mac"`
 	Interface string     `json:"interface"`
 	BootID    string     `json:"boot_id"`
@@ -114,6 +115,10 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 	if !n.InRanges(addr) {
 		return Planned{}, fmt.Errorf("address %s is outside the network's ranges", addr)
 	}
+	addr6, err := planAddr6(n, j.Address6)
+	if err != nil {
+		return Planned{}, err
+	}
 	mac, err := joinMAC(n, j.MAC)
 	if err != nil {
 		return Planned{}, err
@@ -121,14 +126,18 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 	if j.Interface != "" && !config.ValidInterfaceName(j.Interface) {
 		return Planned{}, fmt.Errorf("interface %q is not a valid name", j.Interface)
 	}
-	want := Claim{ID: id, UID: uid, Netns: netns, Network: n.Name, Address: addr, MAC: mac, Interface: j.Interface}
+	want := Claim{ID: id, UID: uid, Netns: netns, Network: n.Name, Address: addr, Address6: addr6, MAC: mac, Interface: j.Interface}
 	for _, c := range s.Claims {
 		if c.Network != n.Name {
 			continue
 		}
 		if c.Netns == netns {
-			if c.Address != addr || c.MAC != mac {
-				return Planned{}, fmt.Errorf("netns already joined with %s %s", c.Address, c.MAC)
+			if c.Address != addr || c.Address6 != addr6 || c.MAC != mac {
+				held := fmt.Sprintf("%s %s", c.Address, c.MAC)
+				if c.Address6.IsValid() {
+					held += " " + c.Address6.String()
+				}
+				return Planned{}, fmt.Errorf("netns already joined with %s", held)
 			}
 			if j.Interface != "" && j.Interface != c.Interface {
 				return Planned{}, fmt.Errorf("netns already joined as interface %q", c.Interface)
@@ -138,11 +147,35 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 		if c.Address == addr {
 			return Planned{}, fmt.Errorf("address %s is taken by %s", addr, Holder(c))
 		}
+		if addr6.IsValid() && c.Address6 == addr6 {
+			return Planned{}, fmt.Errorf("address6 %s is taken by %s", addr6, Holder(c))
+		}
 		if mac != "" && c.MAC == mac {
 			return Planned{}, fmt.Errorf("MAC %s is taken by %s", mac, Holder(c))
 		}
 	}
 	return Planned{Claim: want, Default: j.Default}, nil
+}
+
+// planAddr6 checks an optional IPv6 address. Zero means the join asks for none.
+func planAddr6(n config.Network, s string) (netip.Addr, error) {
+	if s == "" {
+		return netip.Addr{}, nil
+	}
+	if !n.HasIPv6() {
+		return netip.Addr{}, errors.New("address6 needs prefix6 on the network")
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("address6: %w", err)
+	}
+	if !n.IsHost6(a) {
+		return netip.Addr{}, fmt.Errorf("address6 %s is not a host address in %s", a, n.Prefix6)
+	}
+	if a == n.Gateway6 {
+		return netip.Addr{}, fmt.Errorf("address6 %s is the gateway6", a)
+	}
+	return a, nil
 }
 
 // joinMAC is the MAC a claim records. An ipvlan attachment has the parent's MAC, so it has
@@ -235,6 +268,14 @@ func Holder(c Claim) string {
 		s += fmt.Sprintf(", pid %d", c.OwnerPid)
 	}
 	return s + ")"
+}
+
+// Addresses lists the claim's addresses: IPv4, then IPv6 when set.
+func Addresses(c Claim) string {
+	if c.Address6.IsValid() {
+		return c.Address.String() + " " + c.Address6.String()
+	}
+	return c.Address.String()
 }
 
 // ShortID is the container id as `podman ps` shows it.

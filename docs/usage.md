@@ -16,7 +16,7 @@ lanatt daemon -config /etc/lanatt/config.json
   "allowRoot": false,
   "networks": [
     {"name": "lab", "parent": "eno1", "prefix": "192.168.10.0/24", "gateway": "192.168.10.1", "driver": "macvlan",
-     "ranges": ["192.168.10.200-192.168.10.219"]}
+     "ranges": ["192.168.10.200-192.168.10.219"], "prefix6": "fd00:10::/64", "gateway6": "fd00:10::1"}
   ]
 }
 ```
@@ -27,6 +27,8 @@ lanatt daemon -config /etc/lanatt/config.json
 - `driver` is `macvlan` (bridge mode, each attachment has its own MAC) or `ipvlan` (L2 mode, no MAC: attachments share the parent's). See ADR-0011. A parent carries one driver: macvlan and ipvlan networks cannot share a `parent`.
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
+- `prefix6` (optional) turns on IPv6 for the network. It must be a `/48` to `/64` inside `fd00::/8` (ULA). A global prefix needs `allowGlobal6: true`. Two networks on one `parent` cannot have overlapping `prefix6`. `gateway6` (optional) must be a host address in `prefix6`. Without `prefix6`, `gateway6` and `allowGlobal6` are refused. See ADR-0012.
+- Attachments on a network with `prefix6` get the static `address6` lanatt adds, and no RA-derived addresses or routes. A join that omits `address6` gets no static address. Each still has an automatic IPv6 link-local address (`fe80::`), which lanatt does not manage. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them (known gap).
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
 - On start, host devices named `lt<8 hex><n>` are deleted. They are lanatt's temporary devices, left behind only if the daemon died between creating one and moving it into the netns. Do not give your own devices names of that form.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
@@ -44,14 +46,18 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 
 ```json
 [
-  {"network": "lab", "address": "192.168.10.200", "mac": "02:42:c0:a8:0a:c8"},
+  {"network": "lab", "address": "192.168.10.200", "mac": "02:42:c0:a8:0a:c8", "address6": "fd00:10::200"},
   {"network": "iot", "address": "10.20.0.50", "mac": "02:42:0a:14:00:32", "interface": "iot", "default": true}
 ]
 ```
 
 - `interface` defaults to `lan0`, `lan1`, … in list order.
-- `default: true` replaces the netns default route with one via the network gateway. Without it, a default route is added only when the netns has none.
-- The same join again is success. A different address or MAC for the same network and netns, or an address or MAC another netns holds on that network, is refused.
+- `address6` (optional, needs `prefix6`) adds a static IPv6 address in `prefix6`. Clash rules are the same as for `address`. A hook that sends `address6` needs a daemon from the release that added it: an older daemon refuses the unknown field.
+- `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. The replaced route keeps its metric. A v6 replace needs `gateway6` and `address6`. If the join fails after a default changed, the previous default is put back best effort, and a failed restore is logged. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
+- A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and nothing is left behind.
+- IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
+- A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) leaves no device behind. Its claims are dropped too, unless a failed state save keeps one until its owner exits. Retrying is safe.
+- The same join again is success. A different address, address6 or MAC for the same network and netns, or an address, address6 or MAC another netns holds on that network, is refused.
 
 ## Debugging claims
 
@@ -70,7 +76,7 @@ b7fbce2bed23  1001  lan      10.0.1.52  02:42:0a:00:01:34  lan0   4026532505  pr
 - `BOOT` is `this` for the current boot, `previous` for an earlier one, `unknown` for a legacy claim with no boot id.
 - `OWNER` is `pid/comm` of the owner while it is alive, a bare pid if its name cannot be read, or `none` when the claim is dead.
 - `REASON` is why a claim is dead: `other boot`, `owner gone`, `owner pid reused`, `netns changed`, or `no owner recorded`. `-` when alive.
-- `-json` prints an array of claim objects with every claim field (`id`, `uid`, `netns`, `network`, `address`, `mac`, `interface`, `boot_id`, `owner_pid`, `owner_start`), plus `alive`, `reason` (empty when alive) and `owner_comm`. The table's short id and labels are not used. An empty state prints `[]`.
+- `-json` prints an array of claim objects with every claim field (`id`, `uid`, `netns`, `network`, `address`, `address6`, `mac`, `interface`, `boot_id`, `owner_pid`, `owner_start`), plus `alive`, `reason` (empty when alive) and `owner_comm`. The table's short id and labels are not used. An empty state prints `[]`.
 
 ## Container image
 
@@ -84,6 +90,7 @@ podman run -d --name lanatt --network host --pid host \
   ghcr.io/blackdark/lanatt:<version>
 ```
 
+- IPv6 networks (`prefix6`) write sysctls under `/proc/sys`, which is read-only in a container by default. Add `--security-opt unmask=/proc/sys` to the run command when you use `prefix6`. IPv4-only deployments do not need it.
 - `NET_ADMIN` creates the macvlan or ipvlan and configures it. `SYS_ADMIN` enters the workload netns (`setns`). `SYS_PTRACE` opens another user's `/proc/<pid>/ns/net`. Dropping any one of them breaks the join; this was checked one by one.
 - AppArmor: Podman's `containers-default` profile denies reading another process's `/proc/<pid>/ns/net` even with `SYS_PTRACE`, so the container runs unconfined. Docker applies its own `docker-default` profile; running the daemon under Docker with these flags is untested.
 - The root filesystem can be read-only: the daemon writes only to the `/run/lanatt` mount, which holds the socket and the state file.
@@ -118,7 +125,7 @@ An attachment is a kernel macvlan or ipvlan, so its traffic takes the kernel's n
 The Podman-side ordering comes from the references below. lanatt's own throughput has not been benchmarked.
 
 - **Fastest:** run the workload with `--network none`, so the attachment is its only network and every packet, inbound and outbound, stays in the kernel. The examples do this.
-- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the default route stays on the engine network unless the join sets `"default": true`. Without that flag, internet-bound traffic goes through `pasta`; LAN traffic for the prefix still uses the attachment.
+- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the IPv4 default route stays on the engine network unless the join sets `"default": true`. An IPv6 default is added only when the join has `address6`, the network has `gateway6`, and the netns has no IPv6 default. With `"default": true`, an existing IPv6 default is replaced instead. Without that flag, internet-bound traffic goes through `pasta`; LAN traffic for the prefix still uses the attachment.
 - Port publishing (`-p`, `PublishPort=`) does not apply to the attachment: services listen on the attachment's address directly.
 - The MTU is the parent NIC's.
 

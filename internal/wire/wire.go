@@ -23,6 +23,7 @@ const (
 type Join struct {
 	Network   string `json:"network"`
 	Address   string `json:"address"`
+	Address6  string `json:"address6,omitempty"`
 	MAC       string `json:"mac"`
 	Interface string `json:"interface,omitempty"`
 	Default   bool   `json:"default,omitempty"`
