@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,21 @@ func newToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// freeToken draws a token no record in pending uses. The alias must be unique among our devices,
+// or retiring one record would match another's device.
+func freeToken(pending []claims.Pending) (string, error) {
+	for range 16 {
+		token, err := newToken()
+		if err != nil {
+			return "", err
+		}
+		if !slices.ContainsFunc(pending, func(r claims.Pending) bool { return r.Token == token }) {
+			return token, nil
+		}
+	}
+	return "", errors.New("no free cleanup token")
 }
 
 // TempName is the host-side name of device i of an attach with token. It matches StaleTemps.

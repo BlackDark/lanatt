@@ -248,7 +248,7 @@ func TestSaveFailureDegradesUntilSaved(t *testing.T) {
 	}
 }
 
-func TestSettleDropsRecordOnceClaimIsSaved(t *testing.T) {
+func TestSettleKeepsRecordUntilComplete(t *testing.T) {
 	s := reserveServer(t)
 	var calls int
 	s.remove = failingRemove(&calls)
@@ -256,8 +256,81 @@ func TestSettleDropsRecordOnceClaimIsSaved(t *testing.T) {
 	if err := s.settle(p); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.state.Claims) != 1 || len(s.state.Pending) != 0 {
+	if len(s.state.Claims) != 1 || len(s.state.Pending) != 1 {
 		t.Fatalf("after settle: claims %v pending %v", s.state.Claims, s.state.Pending)
+	}
+	if err := s.complete(1, []claims.Planned{p}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.state.Claims) != 1 || len(s.state.Pending) != 0 {
+		t.Fatalf("after complete: claims %v pending %v", s.state.Claims, s.state.Pending)
+	}
+}
+
+func TestCompleteSaveFailureKeepsRecord(t *testing.T) {
+	s := reserveServer(t)
+	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	if err := s.settle(p); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.State = filepath.Join(blocker, "claims.json")
+	if err := s.complete(1, []claims.Planned{p}); err == nil {
+		t.Fatal("complete succeeded into a blocked directory")
+	}
+	if len(s.state.Pending) != 1 || s.state.Pending[0].Token != rec.Token {
+		t.Fatalf("record lost on failed complete: %v", s.state.Pending)
+	}
+}
+
+func TestIntendTokensAreDistinct(t *testing.T) {
+	s := reserveServer(t)
+	_, a := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	q, err := s.reserve(1000, attachReq("c2", "10.254.1.3", "02:00:00:00:00:03"), target{netns: 2, start: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.intend(q[0], 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Token == b.Token || a.Temp == b.Temp {
+		t.Fatalf("tokens collide: %v %v", a, b)
+	}
+}
+
+func TestRetireRefusesConcurrentRemoval(t *testing.T) {
+	s := reserveServer(t)
+	var calls int
+	s.remove = failingRemove(&calls)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	if !s.claimRetire(rec) {
+		t.Fatal("first claim refused")
+	}
+	if err := s.retire([]claims.Pending{rec}); err == nil {
+		t.Fatal("retire ran while another removal of the record was in progress")
+	}
+	if calls != 0 {
+		t.Fatalf("device touched by a second retire: %d calls", calls)
+	}
+	s.releaseRetire(rec)
+	if err := s.retire([]claims.Pending{rec}); err == nil || calls != 1 {
+		t.Fatalf("retire after release: err %v calls %d", err, calls)
+	}
+}
+
+func TestReserveRefusedWhileConflictRetires(t *testing.T) {
+	s := reserveServer(t)
+	var calls int
+	s.remove = failingRemove(&calls)
+	_, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	s.finish(1, nil)
+	s.claimRetire(rec)
+	if _, err := s.reserve(1000, attachReq("c2", "10.254.1.2", "02:00:00:00:00:04"), target{netns: 2, start: "1"}); err == nil {
+		t.Fatal("attach admitted over a record whose removal is running")
 	}
 }
 

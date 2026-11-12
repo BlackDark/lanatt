@@ -209,8 +209,8 @@ func TestCompleteRefusesAfterStop(t *testing.T) {
 	if err := s.detach(1000, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	if !s.complete(1, p) {
-		t.Fatal("attach reported success after a stop")
+	if err := s.complete(1, p); err != errCancelled {
+		t.Fatalf("complete after stop: %v, want errCancelled", err)
 	}
 	if !slices.Contains(s.pending, p[0]) {
 		t.Fatal("refused attach released its reservation before its devices were undone")
