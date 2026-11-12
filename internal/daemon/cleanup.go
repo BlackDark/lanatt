@@ -175,19 +175,10 @@ func openNetns(ino uint64) (*os.File, error) {
 			}
 		}
 	}
-	seen := map[string]bool{}
+	// Every task is scanned: mountinfo lists only the mounts under that task's root, so a
+	// namespace's narrower-rooted task cannot stand in for a wider one.
 	raced := false
 	for _, t := range tasks {
-		mntNs, err := os.Readlink(t + "/ns/mnt")
-		if exited(t, err) {
-			raced = true
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		if seen[mntNs] {
-			continue
-		}
 		data, err := os.ReadFile(t + "/mountinfo")
 		if exited(t, err) {
 			raced = true
@@ -195,12 +186,10 @@ func openNetns(ino uint64) (*os.File, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		// A task's /root is its mount namespace's root, so mount points resolve in that namespace.
-		complete := true
 		for _, m := range parseNsfsMounts(string(data)) {
 			f, ok, err := openIfNetns(t+"/root"+m, ino)
 			if exited(t, err) {
-				complete = false
+				raced = true
 				break
 			} else if err != nil {
 				return nil, err
@@ -208,12 +197,6 @@ func openNetns(ino uint64) (*os.File, error) {
 			if ok {
 				return f, nil
 			}
-		}
-		// Only a full pass proves this namespace has no reference; another task retries otherwise.
-		if complete {
-			seen[mntNs] = true
-		} else {
-			raced = true
 		}
 	}
 	if raced {
