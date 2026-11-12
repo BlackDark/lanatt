@@ -259,3 +259,23 @@ func TestSettleDropsRecordOnceClaimIsSaved(t *testing.T) {
 		t.Fatalf("after settle: claims %v pending %v", s.state.Claims, s.state.Pending)
 	}
 }
+
+func TestParseNsfsMountsPicksNetnsBinds(t *testing.T) {
+	out := "36 25 0:33 / /run/netns/a rw shared:1 - nsfs nsfs rw\n" +
+		"37 25 0:34 / /var/lib/x\\040y rw - ext4 /dev/sda1 rw\n" +
+		"38 25 0:35 / /run/user/0/netns/b rw - nsfs nsfs rw\n" +
+		"bad line\n"
+	got := parseNsfsMounts(out)
+	if len(got) != 2 || got[0] != "/run/netns/a" || got[1] != "/run/user/0/netns/b" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestNoReferenceMeansAbsentNetns(t *testing.T) {
+	if _, err := os.Stat("/proc/self/ns/net"); err != nil {
+		t.Skip("needs linux /proc")
+	}
+	if _, err := openNetns(^uint64(0)); !errors.Is(err, errNoReference) {
+		t.Fatalf("unreferenced netns: %v, want errNoReference", err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 
 	"lanatt/internal/claims"
 	"lanatt/internal/wire"
@@ -17,9 +18,6 @@ import (
 
 // aliasPrefix marks a device lanatt created. The alias carries the attach's token.
 const aliasPrefix = "lanatt:"
-
-// errUnreachable means no process is in the record's netns, so its devices cannot be checked.
-var errUnreachable = errors.New("netns has no process to enter")
 
 // newToken is the random identity of one attach's devices: it is the host-side temp name's
 // middle and the alias. Eight hex digits keep the name within IFNAMSIZ.
@@ -73,8 +71,11 @@ func findOwned(ns *os.File, rec claims.Pending, temp string) (string, bool, erro
 	return ownedName(out, rec.Token, temp)
 }
 
-// removeOwned deletes rec's device on the host and in its netns, using ns if given, else the
-// netns found through any process in it. It reports gone only when both checks find nothing.
+// errNoReference means nothing holds the netns: it is destroyed, and its devices went with it.
+var errNoReference = errors.New("no process, fd or mount holds the netns")
+
+// removeOwned deletes rec's device on the host and in its netns, using ns if given. A netns
+// with no reference left is destroyed, so its device is gone once the host check misses it.
 func removeOwned(rec claims.Pending, ns *os.File) (bool, error) {
 	if name, ok, err := findOwned(nil, rec, rec.Temp); err != nil {
 		return false, err
@@ -85,12 +86,14 @@ func removeOwned(rec claims.Pending, ns *os.File) (bool, error) {
 	}
 	if ns == nil {
 		var err error
-		if ns, err = openNetns(rec.Netns); err != nil {
+		if ns, err = openNetns(rec.Netns); errors.Is(err, errNoReference) {
+			return true, nil
+		} else if err != nil {
 			return false, err
 		}
 		defer ns.Close()
-	} else if key, kerr := fileNsID(ns); kerr != nil || key.ino != rec.Netns {
-		return false, fmt.Errorf("netns %d: %w", rec.Netns, errors.Join(errUnreachable, kerr))
+	} else if key, err := fileNsID(ns); err != nil || key.ino != rec.Netns {
+		return false, fmt.Errorf("netns %d: attach's fd is another netns", rec.Netns)
 	}
 	name, ok, err := findOwned(ns, rec, "")
 	if err != nil {
@@ -104,33 +107,93 @@ func removeOwned(rec claims.Pending, ns *os.File) (bool, error) {
 	return true, nil
 }
 
-// openNetns opens the netns with inode ino through any process in it. The fd is checked after
-// open: a pid can exit and its number be reused.
+// openNetns opens the netns with inode ino through any reference: a process in it, an fd to it,
+// or an nsfs mount of it. Each fd is checked after open, since a pid can exit and be reused.
 func openNetns(ino uint64) (*os.File, error) {
-	entries, err := os.ReadDir("/proc")
+	pids := procPids()
+	for _, pid := range pids {
+		if f, ok := openIfNetns(fmt.Sprintf("/proc/%d/ns/net", pid), ino); ok {
+			return f, nil
+		}
+	}
+	for _, pid := range pids {
+		fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
+		if err != nil {
+			continue
+		}
+		for _, fd := range fds {
+			path := fmt.Sprintf("/proc/%d/fd/%s", pid, fd.Name())
+			if target, err := os.Readlink(path); err == nil && target == fmt.Sprintf("net:[%d]", ino) {
+				if f, ok := openIfNetns(path, ino); ok {
+					return f, nil
+				}
+			}
+		}
+	}
+	mounts, err := nsfsMounts()
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		path := fmt.Sprintf("/proc/%d/ns/net", pid)
-		key, err := nsID(path)
-		if err != nil || key.ino != ino {
-			continue
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		if got, err := fileNsID(f); err == nil && got.ino == ino {
+	for _, m := range mounts {
+		if f, ok := openIfNetns(m, ino); ok {
 			return f, nil
 		}
-		f.Close()
 	}
-	return nil, fmt.Errorf("netns %d: %w", ino, errUnreachable)
+	return nil, errNoReference
+}
+
+// openIfNetns opens path and reports whether it is the netns ino.
+func openIfNetns(path string, ino uint64) (*os.File, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	if key, err := fileNsID(f); err == nil && key.ino == ino {
+		return f, true
+	}
+	f.Close()
+	return nil, false
+}
+
+// procPids lists the numeric entries of /proc.
+func procPids() []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, e := range entries {
+		if pid, err := strconv.Atoi(e.Name()); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// nsfsMounts lists the mount points of nsfs filesystems, which bind-mount netns.
+func nsfsMounts() ([]string, error) {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return nil, err
+	}
+	return parseNsfsMounts(string(data)), nil
+}
+
+// parseNsfsMounts picks the mount points of nsfs entries in mountinfo output.
+func parseNsfsMounts(out string) []string {
+	var mounts []string
+	for _, line := range strings.Split(out, "\n") {
+		left, right, ok := strings.Cut(line, " - ")
+		if !ok {
+			continue
+		}
+		fl, rf := strings.Fields(left), strings.Fields(right)
+		if len(fl) < 5 || len(rf) == 0 || rf[0] != "nsfs" {
+			continue
+		}
+		mounts = append(mounts, strings.ReplaceAll(fl[4], `\040`, " "))
+	}
+	return mounts
 }
 
 // conflicts reports whether rec holds something req would take: its netns, or its address or
