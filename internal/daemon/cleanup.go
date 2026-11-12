@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"lanatt/internal/claims"
 	"lanatt/internal/wire"
@@ -180,7 +181,10 @@ func openNetns(ino uint64) (*os.File, error) {
 	raced := false
 	for _, t := range tasks {
 		data, err := os.ReadFile(t + "/mountinfo")
-		if exited(t, err) {
+		// A zombie has no namespaces left: its mountinfo fails with EINVAL, and it holds nothing.
+		if errors.Is(err, syscall.EINVAL) {
+			continue
+		} else if exited(t, err) {
 			raced = true
 			continue
 		} else if err != nil {
