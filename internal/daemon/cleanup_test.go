@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -272,8 +273,17 @@ func TestParseNsfsMountsPicksNetnsBinds(t *testing.T) {
 }
 
 func TestNoReferenceMeansAbsentNetns(t *testing.T) {
-	if _, err := os.Stat("/proc/self/ns/net"); err != nil {
+	pids, err := procPids()
+	if err != nil {
 		t.Skip("needs linux /proc")
+	}
+	// A live pid we cannot read is an error by design; the test needs root (as on the VM).
+	for _, pid := range pids {
+		if f, err := os.Open(fmt.Sprintf("/proc/%d/ns/net", pid)); err != nil {
+			t.Skipf("needs read access to every /proc/<pid>/ns/net: %v", err)
+		} else {
+			f.Close()
+		}
 	}
 	if _, err := openNetns(^uint64(0)); !errors.Is(err, errNoReference) {
 		t.Fatalf("unreferenced netns: %v, want errNoReference", err)
