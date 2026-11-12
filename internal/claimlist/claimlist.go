@@ -3,7 +3,8 @@
 package claimlist
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -50,9 +51,12 @@ func WriteJSON(w io.Writer, rows []Row) error {
 	if rows == nil {
 		rows = []Row{}
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(rows)
+	b, err := json.Marshal(rows, jsontext.WithIndent("  "))
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(b, '\n'))
+	return err
 }
 
 func bootLabel(claimBoot, boot string) string {

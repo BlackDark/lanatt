@@ -2,7 +2,7 @@ package cnijournal
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 )
@@ -10,7 +10,7 @@ import (
 // Attach runs ADD under the journal and returns its result. Any failure after ADD ran
 // leaves the record owing DEL, and DEL is attempted at once. If that DEL fails the record
 // stays, and Reconcile retries it.
-func (s *Store) Attach(ctx context.Context, run Runner, r Record) (json.RawMessage, error) {
+func (s *Store) Attach(ctx context.Context, run Runner, r Record) (jsontext.Value, error) {
 	defer s.lock(r.UID, r.ContainerID)()
 	r, err := s.Begin(r)
 	if err != nil {

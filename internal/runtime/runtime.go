@@ -3,7 +3,8 @@
 package runtime
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -72,7 +73,7 @@ func absolute(p, cwd string) string {
 // InjectHooks adds createRuntime and poststop hooks to an OCI config.
 // It reports false, and leaves the config alone, when the annotation is absent.
 func InjectHooks(config []byte, self, socket string) ([]byte, bool, error) {
-	var spec map[string]json.RawMessage
+	var spec map[string]jsontext.Value
 	if err := json.Unmarshal(config, &spec); err != nil {
 		return nil, false, fmt.Errorf("config.json: %w", err)
 	}
@@ -85,7 +86,7 @@ func InjectHooks(config []byte, self, socket string) ([]byte, bool, error) {
 	if _, ok := ann[wire.AnnotationKey]; !ok {
 		return config, false, nil
 	}
-	hooks := map[string]json.RawMessage{}
+	hooks := map[string]jsontext.Value{}
 	if raw, ok := spec["hooks"]; ok {
 		if err := json.Unmarshal(raw, &hooks); err != nil {
 			return nil, false, fmt.Errorf("config.json hooks: %w", err)
@@ -102,17 +103,17 @@ func InjectHooks(config []byte, self, socket string) ([]byte, bool, error) {
 			"path": self,
 			"args": []string{"lanatt", "hook", name, "-socket", socket},
 		})
-		b, err := json.Marshal(list)
+		b, err := json.Marshal(list, json.Deterministic(true))
 		if err != nil {
 			return nil, false, err
 		}
 		hooks[stage] = b
 	}
-	b, err := json.Marshal(hooks)
+	b, err := json.Marshal(hooks, json.Deterministic(true))
 	if err != nil {
 		return nil, false, err
 	}
 	spec["hooks"] = b
-	out, err := json.Marshal(spec)
+	out, err := json.Marshal(spec, json.Deterministic(true))
 	return out, true, err
 }

@@ -1,7 +1,7 @@
 package claims
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/netip"
 	"path/filepath"
 	"strings"

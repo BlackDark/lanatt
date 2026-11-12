@@ -213,3 +213,12 @@ func TestParseIPv6GlobalWithAllowGlobal6(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParseRefusesCaseMismatchAndTrailingData(t *testing.T) {
+	if _, err := Parse([]byte(`{"UIDs":[1000]}`)); err == nil {
+		t.Error("key with wrong case accepted")
+	}
+	if _, err := Parse([]byte(`{"uids":[1000]} {}`)); err == nil {
+		t.Error("trailing data accepted")
+	}
+}

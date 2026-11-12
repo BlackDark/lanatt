@@ -6,7 +6,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -42,16 +43,16 @@ type Record struct {
 	Network       string            `json:"network"`
 	Plugin        string            `json:"plugin"`
 	PluginVersion string            `json:"plugin_version"`
-	Config        json.RawMessage   `json:"config"`
+	Config        jsontext.Value    `json:"config"`
 	Args          map[string]string `json:"args,omitempty"`
 	State         State             `json:"state"`
-	Result        json.RawMessage   `json:"result,omitempty"`
+	Result        jsontext.Value    `json:"result,omitempty"`
 }
 
 // Runner executes CNI ADD and DEL. Add must return an error for a malformed result.
 // Del must succeed when the netns is gone and when the attachment is already removed.
 type Runner interface {
-	Add(ctx context.Context, r Record) (json.RawMessage, error)
+	Add(ctx context.Context, r Record) (jsontext.Value, error)
 	Del(ctx context.Context, r Record, netnsGone bool) error
 }
 
@@ -163,7 +164,7 @@ func (s *Store) Begin(r Record) (Record, error) {
 }
 
 // commit saves result and marks the attachment added. Call it before acknowledging ADD.
-func (s *Store) commit(uid uint32, containerID string, result json.RawMessage) error {
+func (s *Store) commit(uid uint32, containerID string, result jsontext.Value) error {
 	return s.update(uid, containerID, []State{StateIntent}, func(r *Record) {
 		r.State = StateAdded
 		r.Result = result
@@ -277,7 +278,7 @@ func read(path string) (Record, bool, error) {
 
 // write replaces path atomically: the file and its directory are synced before success.
 func write(path string, r Record) error {
-	data, err := json.MarshalIndent(r, "", "  ")
+	data, err := json.Marshal(r, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return err
 	}

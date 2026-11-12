@@ -2,8 +2,7 @@
 package config
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -95,9 +94,7 @@ func Load(path string) (Config, error) {
 // Parse validates config JSON.
 func Parse(data []byte) (Config, error) {
 	var raw rawConfig
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&raw); err != nil {
+	if err := json.Unmarshal(data, &raw, json.RejectUnknownMembers(true)); err != nil {
 		return Config{}, fmt.Errorf("config: %w", err)
 	}
 	cfg := Config{Socket: raw.Socket, State: raw.State, UIDs: map[uint32]bool{}, AllowRoot: raw.AllowRoot, Networks: map[string]Network{}}

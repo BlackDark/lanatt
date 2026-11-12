@@ -2,7 +2,8 @@
 package claims
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
@@ -321,7 +322,7 @@ func Save(path string, s State) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := json.Marshal(s, jsontext.WithIndent("  "))
 	if err != nil {
 		return err
 	}
