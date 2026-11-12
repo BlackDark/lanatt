@@ -89,6 +89,8 @@ func findOwned(ns *os.File, rec claims.Pending, temp string) (string, bool, erro
 }
 
 // errNoReference means nothing holds the netns: it is destroyed, and its devices went with it.
+var errRaced = errors.New("netns lookup raced with a task exit; retry")
+
 var errNoReference = errors.New("no process, fd or mount holds the netns")
 
 // removeOwned deletes rec's device on the host and in its netns, using ns if given. A netns
@@ -174,9 +176,11 @@ func openNetns(ino uint64) (*os.File, error) {
 		}
 	}
 	seen := map[string]bool{}
+	raced := false
 	for _, t := range tasks {
 		mntNs, err := os.Readlink(t + "/ns/mnt")
 		if exited(t, err) {
+			raced = true
 			continue
 		} else if err != nil {
 			return nil, err
@@ -184,18 +188,20 @@ func openNetns(ino uint64) (*os.File, error) {
 		if seen[mntNs] {
 			continue
 		}
-		seen[mntNs] = true
 		data, err := os.ReadFile(t + "/mountinfo")
 		if exited(t, err) {
+			raced = true
 			continue
 		} else if err != nil {
 			return nil, err
 		}
 		// A task's /root is its mount namespace's root, so mount points resolve in that namespace.
+		complete := true
 		for _, m := range parseNsfsMounts(string(data)) {
 			f, ok, err := openIfNetns(t+"/root"+m, ino)
 			if exited(t, err) {
-				continue
+				complete = false
+				break
 			} else if err != nil {
 				return nil, err
 			}
@@ -203,6 +209,15 @@ func openNetns(ino uint64) (*os.File, error) {
 				return f, nil
 			}
 		}
+		// Only a full pass proves this namespace has no reference; another task retries otherwise.
+		if complete {
+			seen[mntNs] = true
+		} else {
+			raced = true
+		}
+	}
+	if raced {
+		return nil, errRaced
 	}
 	return nil, errNoReference
 }
