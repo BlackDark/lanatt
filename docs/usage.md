@@ -53,9 +53,10 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 
 - `interface` defaults to `lan0`, `lan1`, … in list order.
 - `address6` (optional, needs `prefix6`) adds a static IPv6 address in `prefix6`. Clash rules are the same as for `address`. A hook that sends `address6` needs a daemon from the release that added it: an older daemon refuses the unknown field.
-- `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
+- `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. The replaced route keeps its metric. A v6 replace needs `gateway6` and `address6`. If the join fails after a default changed, the previous default is put back best effort, and a failed restore is logged. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
 - A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and nothing is left behind.
 - IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
+- A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) leaves no device behind. Its claims are dropped too, unless a failed state save keeps one until its owner exits. Retrying is safe.
 - The same join again is success. A different address, address6 or MAC for the same network and netns, or an address, address6 or MAC another netns holds on that network, is refused.
 
 ## Debugging claims

@@ -19,7 +19,6 @@ The reasons are measured, not guessed. On a dual-stack LAN a fresh netns has `ac
 
 - ULA addresses reach the LAN only. The workload has no internet over IPv6 unless the router routes ULA through NAT66, which is the router's job.
 - No DNS over IPv6 from the attachment: `accept_ra=0` drops RDNSS, and DHCPv6 is not implemented (#20).
-- A parent MTU below 1280 has no IPv6 at all. A `prefix6` join is refused; IPv4-only joins are unaffected.
 - The RA-learned MTU (1492 measured on the test LAN) does not apply to static routes. The link keeps its parent MTU (1500). Off-link traffic could hit a smaller path MTU.
 
 ## Verified
