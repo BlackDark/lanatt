@@ -63,6 +63,10 @@ func TestIPv6SysctlsPerNetwork(t *testing.T) {
 	if got := ipv6Sysctls(dual); !slices.Equal(got, want) {
 		t.Errorf("dual-stack: %v", got)
 	}
+	noSLAAC := config.Network{NoSLAAC: true}
+	if got := ipv6Sysctls(noSLAAC); !slices.Equal(got, [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}) {
+		t.Errorf("noSLAAC: %v", got)
+	}
 }
 
 func TestDADState(t *testing.T) {

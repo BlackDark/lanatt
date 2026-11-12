@@ -30,7 +30,7 @@ A rootless container cannot create a macvlan, because the host NIC is outside it
 
 ## Install
 
-Run the daemon (rootful, host network and pid namespace, three capabilities):
+Run the daemon (rootful, host network and pid namespace, three capabilities). Networks with `prefix6` or `noSLAAC` also need `--security-opt unmask=/proc/sys`:
 
 ```bash
 podman run -d --name lanatt --network host --pid host \
@@ -101,7 +101,7 @@ Yes, with `"allowRoot": true` in the config. Rootful containers then use the sam
 
 ### Does it do IPv6 or DHCP?
 
-IPv6 is opt-in and static: a network with `prefix6` can give an attachment a ULA address per join. Nothing is assigned by default. Global prefixes need an explicit `allowGlobal6`. No SLAAC, no DHCPv6. See [ADR-0012](docs/adr/0012-ipv6-ula.md) and [usage](docs/usage.md). Networks use `macvlan` or `ipvlan` (L2); ipvlan attachments take no MAC ([ADR-0011](docs/adr/0011-ipvlan.md)).
+IPv6 is opt-in and static: a network with `prefix6` can give an attachment a ULA address per join. Nothing is assigned by default. Global prefixes need an explicit `allowGlobal6`. No SLAAC, no DHCPv6. An IPv4-only network can set `noSLAAC` to keep LAN SLAAC off its attachments. See [ADR-0012](docs/adr/0012-ipv6-ula.md) and [usage](docs/usage.md). Networks use `macvlan` or `ipvlan` (L2); ipvlan attachments take no MAC ([ADR-0011](docs/adr/0011-ipvlan.md)).
 
 ## Development
 

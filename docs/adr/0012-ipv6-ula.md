@@ -6,11 +6,11 @@ The reasons are measured, not guessed. On a dual-stack LAN a fresh netns has `ac
 
 ## Decisions
 
-- **Opt-in.** `prefix6` is the switch. No boolean `ipv6` flag, so there is no invalid combination to check. Without `prefix6`, `gateway6` and `allowGlobal6` are errors.
+- **Opt-in.** `prefix6` is the switch. `noSLAAC` is the only other IPv6 knob and is refused with `prefix6`. Without `prefix6`, `gateway6` and `allowGlobal6` are errors.
 - **ULA by default.** `prefix6` must be a `/48` to `/64` inside `fd00::/8`. `allowGlobal6: true` admits any other unicast prefix. Link-local, multicast, loopback and unspecified prefixes are refused either way.
 - **Static addresses.** `address6` per join, in `prefix6`, not the subnet-router address and not the gateway. Clash rules match IPv4: an address or MAC held by another netns on the network is refused.
-- **Attachment sysctls.** Networks with `prefix6` set `disable_ipv6=0`, `accept_ra=0`, `autoconf=0`, `accept_dad=1` and `dad_transmits=1` before the link comes up, so no RA is processed and DAD runs even if the caller's netns disabled it. Networks without it write nothing: IPv4 joins do not need a writable `/proc/sys`. Known gap: their attachments keep host SLAAC on a dual-stack LAN. Follow-up: a per-network opt-out.
-- **Container.** The daemon's `/proc/sys` is read-only by default. `prefix6` needs `--security-opt unmask=/proc/sys` (verified on the VM: the write fails without it).
+- **Attachment sysctls.** Networks with `prefix6` set `disable_ipv6=0`, `accept_ra=0`, `autoconf=0`, `accept_dad=1` and `dad_transmits=1` before the link comes up, so no RA is processed and DAD runs even if the caller's netns disabled it. Networks with `noSLAAC` set `accept_ra=0` and `autoconf=0` only, so link-local stays. Other networks write nothing: IPv4 joins do not need a writable `/proc/sys`. Their attachments keep host SLAAC on a dual-stack LAN.
+- **Container.** The daemon's `/proc/sys` is read-only by default. `prefix6` and `noSLAAC` need `--security-opt unmask=/proc/sys`. Verified on the VM for `prefix6`: the write fails without it.
 - **DAD.** After `addr add`, lanatt waits until the address is preferred. `dadfailed` refuses the join: the device is deleted and no claim is written.
 - **Routes per family** (ADR-0005). A v6 default needs `gateway6` and the attachment's `address6`. `default: true` replaces the default in each family the attachment serves.
 - **Overlap.** Two networks on one parent cannot have overlapping `prefix6`: the same ULA address would sit on one segment, and DAD sees it only while both are up. The IPv4 rule is in ADR-0003.
@@ -24,7 +24,7 @@ The reasons are measured, not guessed. On a dual-stack LAN a fresh netns has `ac
 
 ## Verified
 
-Test VM, dummy parent, `test/accept.sh` scenario 18: a dual-stack join gets `accept_ra=0`, exactly one static v6 address and a v6 default via `gateway6`; a duplicate address6 on the LAN is refused by DAD, and nothing is left behind. A static ULA address on the real LAN was reachable from another LAN host. Unit tests cover the config and claims rules.
+Test VM, dummy parent, `test/accept.sh` scenarios 18, 20 and 21 (`noSLAAC` writes, RouteKeep keeps the v6 default): a dual-stack join gets `accept_ra=0`, exactly one static v6 address and a v6 default via `gateway6`; a duplicate address6 on the LAN is refused by DAD, and nothing is left behind. A static ULA address on the real LAN was reachable from another LAN host. Unit tests cover the config and claims rules.
 
 ## Considered options
 

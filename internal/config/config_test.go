@@ -161,6 +161,23 @@ func TestParseIPv6(t *testing.T) {
 	}
 }
 
+func TestParseNoSLAAC(t *testing.T) {
+	cfg, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","noSLAAC":true}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Networks["lan"].NoSLAAC {
+		t.Error("noSLAAC not set on an IPv4-only network")
+	}
+	plain, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Networks["lan"].NoSLAAC {
+		t.Error("noSLAAC set without the option")
+	}
+}
+
 func TestParseIPv6Refuses(t *testing.T) {
 	base := `"name":"lan","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"`
 	cases := map[string]string{
@@ -176,6 +193,7 @@ func TestParseIPv6Refuses(t *testing.T) {
 		"gateway6 outside":             `"prefix6":"fd00:1::/64","gateway6":"fd00:2::1"`,
 		"gateway6 anycast":             `"prefix6":"fd00:1::/64","gateway6":"fd00:1::"`,
 		"gateway6 is prefix":           `"prefix6":"fd00:1::/64","gateway6":"fd00:1::"`,
+		"noSLAAC with prefix6":         `"prefix6":"fd00:1::/64","noSLAAC":true`,
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -183,6 +201,10 @@ func TestParseIPv6Refuses(t *testing.T) {
 				t.Fatalf("%s admitted", extra)
 			}
 		})
+	}
+	_, err := Parse([]byte(cfgWith(`{` + base + `,"prefix6":"fd00:1::/64","noSLAAC":true}`)))
+	if err == nil || !strings.Contains(err.Error(), "noSLAAC") {
+		t.Errorf("noSLAAC with prefix6: %v", err)
 	}
 }
 
