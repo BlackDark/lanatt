@@ -254,6 +254,14 @@ check "refusal names the DAD duplicate" "grep -q 'address6 fd77:254::51 is alrea
 check "DAD refusal leaves no device in the netns" "[[ \$(in_ns $S3 -br link show | grep -c lan0) -eq 0 ]]"
 check "DAD refusal writes no claim" "! grep -q 'fd77:254::51' '$STATE'"
 
+# 19. default: true replaces an existing v6 default and keeps its metric (a route at metric 1024 would lose to it).
+netns "$U"; S4=$NSPID
+in_ns $S4 link add d0 type dummy
+in_ns $S4 link set d0 up
+in_ns $S4 -6 route add default via fd77:255::1 dev d0 metric 100 onlink
+check "replacing join with default true" "hook $U create cs4 $S4 '[{\"network\":\"lab6\",\"address\":\"10.254.1.60\",\"mac\":\"02:42:0a:fe:01:60\",\"address6\":\"fd77:254::60\",\"default\":true}]'"
+check "one v6 default left, on lan0" "[[ \$(in_ns $S4 -6 route show default | wc -l) -eq 1 ]] && in_ns $S4 -6 route show default | grep -q 'via fd77:254::1 dev lan0.* metric 100'"
+
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"
 echo "$pass passed, $fail failed"
