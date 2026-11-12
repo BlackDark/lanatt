@@ -96,6 +96,21 @@ func TestParseRefusesMixedDriversOnParent(t *testing.T) {
 	}
 }
 
+func TestParseRefusesOverlappingPrefix6OnParent(t *testing.T) {
+	_, err := Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:10::/64"},
+		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan","prefix6":"fd00:10::/48"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "overlaps") {
+		t.Fatalf("overlapping prefix6 on one parent: %v", err)
+	}
+	_, err = Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:10::/64"},
+		{"name":"b","parent":"d0","prefix":"10.254.2.0/28","gateway":"10.254.2.14","driver":"macvlan","prefix6":"fd00:11::/64"}]}`))
+	if err != nil {
+		t.Fatalf("disjoint prefix6 refused: %v", err)
+	}
+}
+
 func TestParseIPv6(t *testing.T) {
 	cfg, err := Parse([]byte(cfgWith(`{"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:1::/64","gateway6":"fd00:1::1"}`)))
 	if err != nil {

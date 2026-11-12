@@ -114,6 +114,9 @@ func Parse(data []byte) (Config, error) {
 		return Config{}, errors.New("config: uids is empty, so every caller would be refused")
 	}
 	driverOn := map[string]string{}
+	// Two networks on one parent with overlapping prefix6 would hand out the same ULA addresses on
+	// one segment; DAD only catches a duplicate while both are up.
+	v6On := map[string][]netip.Prefix{}
 	for _, rn := range raw.Networks {
 		n, err := parseNetwork(rn)
 		if err != nil {
@@ -126,6 +129,14 @@ func Parse(data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("config: network %q: parent %q already carries %s networks; macvlan and ipvlan cannot share a parent", n.Name, n.Parent, other)
 		}
 		driverOn[n.Parent] = n.Driver
+		if n.HasIPv6() {
+			for _, other := range v6On[n.Parent] {
+				if other.Overlaps(n.Prefix6) {
+					return Config{}, fmt.Errorf("config: network %q: prefix6 %s overlaps %s on parent %q", n.Name, n.Prefix6, other, n.Parent)
+				}
+			}
+			v6On[n.Parent] = append(v6On[n.Parent], n.Prefix6)
+		}
 		cfg.Networks[n.Name] = n
 	}
 	return cfg, nil
