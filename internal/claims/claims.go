@@ -42,9 +42,10 @@ type Owner struct {
 	Start  string
 }
 
-// State is every live claim.
+// State is every live claim and every device whose removal is not yet verified.
 type State struct {
-	Claims []Claim `json:"claims"`
+	Claims  []Claim   `json:"claims"`
+	Pending []Pending `json:"pending,omitempty"`
 }
 
 // Planned is an admitted join. Existing means the attachment is already in place.
@@ -238,7 +239,7 @@ func Own(plans []Planned, o Owner) []Planned {
 
 // Add records the new claims among plans.
 func (s State) Add(plans []Planned) State {
-	out := State{Claims: append([]Claim(nil), s.Claims...)}
+	out := s.clone()
 	for _, p := range plans {
 		if !p.Existing {
 			out.Claims = append(out.Claims, p.Claim)
@@ -249,7 +250,8 @@ func (s State) Add(plans []Planned) State {
 
 // Drop removes every claim uid made for container id.
 func (s State) Drop(uid uint32, id string) State {
-	out := State{Claims: []Claim{}}
+	out := s.clone()
+	out.Claims = []Claim{}
 	for _, c := range s.Claims {
 		if c.ID != id || c.UID != uid {
 			out.Claims = append(out.Claims, c)
@@ -260,7 +262,7 @@ func (s State) Drop(uid uint32, id string) State {
 
 // Prune removes claims that alive rejects and returns them.
 func (s State) Prune(alive func(Claim) bool) (State, []Claim) {
-	out := State{Claims: []Claim{}}
+	out := State{Claims: []Claim{}, Pending: s.Pending}
 	var dropped []Claim
 	for _, c := range s.Claims {
 		if alive(c) {

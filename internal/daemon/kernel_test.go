@@ -36,7 +36,7 @@ func TestStaleTemps(t *testing.T) {
 	if len(got) != 2 || got[0] != "ltf00003290" || got[1] != "lt0000000a12" {
 		t.Fatalf("got %v", got)
 	}
-	if name := TempName(0x1f0000329, 3); name != "ltf00003293" || len(StaleTemps("1: "+name+": x")) != 1 {
+	if name := TempName("abcd1234", 3); name != "ltabcd12343" || len(StaleTemps("1: "+name+": x")) != 1 {
 		t.Fatalf("TempName %q not recognised", name)
 	}
 }

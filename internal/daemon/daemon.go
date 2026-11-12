@@ -30,6 +30,10 @@ type Server struct {
 	pending []claims.Planned
 	busy    map[uint64]*attachment
 	conns   chan struct{}
+	// degraded means memory is ahead of the state file: admissions wait until a save succeeds.
+	degraded bool
+	// remove overrides removeOwned in tests.
+	remove func(claims.Pending) (bool, error)
 }
 
 // attachment is an attach in progress in one netns. A stop for its container sets stopped.
@@ -71,12 +75,16 @@ func New(cfg config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("claims: %d loaded", len(st.Claims))
+	log.Printf("claims: %d loaded, %d pending", len(st.Claims), len(st.Pending))
 	st = prune(st, boot)
 	if err := claims.Save(cfg.State, st); err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg, boot: boot, state: st, conns: make(chan struct{}, maxConns)}, nil
+	s := &Server{cfg: cfg, boot: boot, state: st, conns: make(chan struct{}, maxConns)}
+	if err := s.recoverPending(); err != nil {
+		log.Printf("%v", err)
+	}
+	return s, nil
 }
 
 // prepareSocketDir makes the socket's directory traversable. Rootless hooks must reach the
@@ -194,29 +202,30 @@ func (s *Server) attach(uid uint32, req wire.Request) error {
 			s.finish(t.netns, plans)
 		}
 	}()
-	// All or nothing: a failed request leaves no device or claim of its own behind.
+	// All or nothing: a failed request leaves no device or claim of its own behind, or a record
+	// of one that could not be removed.
 	until := time.Now().Add(attachBudget)
 	var joined []joinedPlan
 	for i, p := range plans {
 		if err := s.checkJoin(p, until); err != nil {
-			s.rollback(t.ns, joined)
-			return err
+			return s.abort(t.ns, joined, err)
 		}
-		undo, err := join(t.ns, s.cfg.Networks[p.Network], p, TempName(t.netns, i))
+		rec, err := s.intend(p, i)
 		if err != nil {
-			s.rollback(t.ns, joined)
-			return fmt.Errorf("network %q: %w", p.Network, err)
+			return s.abort(t.ns, joined, err)
+		}
+		undo, err := join(t.ns, s.cfg.Networks[p.Network], p, rec.Temp, rec.Token)
+		// Recorded even when join failed: its device may exist and must be found by token.
+		joined = append(joined, joinedPlan{plan: p, undo: undo, rec: rec})
+		if err != nil {
+			return s.abort(t.ns, joined, fmt.Errorf("network %q: %w", p.Network, err))
 		}
 		if err := s.settle(p); err != nil {
-			undoJoin(t.ns, undo, p.Interface)
-			s.rollback(t.ns, joined)
-			return err
+			return s.abort(t.ns, joined, err)
 		}
-		joined = append(joined, joinedPlan{plan: p, undo: undo})
 	}
 	if s.complete(t.netns, plans) {
-		s.rollback(t.ns, joined)
-		return errCancelled
+		return s.abort(t.ns, joined, errCancelled)
 	}
 	released = true
 	return nil
@@ -235,24 +244,64 @@ func (s *Server) complete(netns uint64, plans []claims.Planned) (cancelled bool)
 	return false
 }
 
-// joinedPlan is a join this attach made, with what it takes to undo its default routes.
+// joinedPlan is a join this attach made, with what it takes to undo its default routes and the
+// record that finds its device.
 type joinedPlan struct {
 	plan claims.Planned
 	undo defaultUndo
+	rec  claims.Pending
 }
 
 // reserve plans req under mu and holds the new joins as pending. One netns runs one attach at a
 // time, so a retry cannot see a half-made attachment as already in place.
 func (s *Server) reserve(uid uint32, req wire.Request, t target) ([]claims.Planned, error) {
 	s.mu.Lock()
+	conflicts, err := s.admitLocked(req, t.netns)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if len(conflicts) > 0 {
+		s.mu.Unlock()
+		if err := s.retire(conflicts); err != nil {
+			return nil, err
+		}
+		return s.reserve(uid, req, t)
+	}
 	defer s.mu.Unlock()
-	if s.busy[t.netns] != nil {
+	return s.planLocked(uid, req, t)
+}
+
+// admitLocked checks what planning needs: the netns is free, the state is saved, and it returns
+// the records req conflicts with. A conflicting record on a busy netns refuses req. Caller holds mu.
+func (s *Server) admitLocked(req wire.Request, netns uint64) ([]claims.Pending, error) {
+	if s.busy[netns] != nil {
 		return nil, errors.New("an attach to this netns is already in progress")
+	}
+	if s.degraded {
+		if err := s.save(); err != nil {
+			return nil, fmt.Errorf("state not saved, refusing attaches: %w", err)
+		}
 	}
 	// A netns inode can be reused, so a dead workload's claim must not look like this one's.
 	if err := s.commit(prune(s.state, s.boot)); err != nil {
 		return nil, err
 	}
+	var conflicts []claims.Pending
+	for _, rec := range s.state.Pending {
+		if !s.conflicts(rec, req, netns) {
+			continue
+		}
+		if s.busy[rec.Netns] != nil {
+			return nil, fmt.Errorf("cleanup pending for %s: an attach to its netns is in progress", claims.ShortID(rec.ID))
+		}
+		conflicts = append(conflicts, rec)
+	}
+	return conflicts, nil
+}
+
+// planLocked plans req and holds its joins as pending. Caller holds mu.
+func (s *Server) planLocked(uid uint32, req wire.Request, t target) ([]claims.Planned, error) {
 	plans, err := claims.Plan(s.state.Add(s.pending), s.cfg.Networks, uid, req.ID, t.netns, req.Joins)
 	if err != nil {
 		return nil, err
@@ -293,41 +342,94 @@ func (s *Server) active(p claims.Planned) bool {
 	return a != nil && !a.stopped && slices.Contains(s.pending, p)
 }
 
-// settle makes one join's claim durable. The reservation stays until finish: the device is up
-// until the attach ends, so its address must stay held.
+// settle makes one join's claim durable and drops its record: the claim now finds the device.
+// The reservation stays until finish: the device is up until the attach ends, so its address
+// must stay held.
 func (s *Server) settle(p claims.Planned) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.active(p) {
 		return errCancelled
 	}
-	return s.commit(s.state.Add([]claims.Planned{p}))
+	// The netns is busy for this attach, so admitLocked has retired every other record of it.
+	return s.commit(s.state.Add([]claims.Planned{p}).RemovePending(p.Netns, p.Network))
 }
 
-// rollback undoes the joins of a failed attach, newest first. Claims are forgotten first. If that
-// save fails, the stale claim holds its address until its owner exits: the safe side, with no
-// device left unclaimed. The devices go either way.
-func (s *Server) rollback(ns *os.File, joined []joinedPlan) {
-	if len(joined) == 0 {
-		return
+// intend records a device before it is created, so a crash or failed removal still finds it.
+// A refused save creates nothing.
+func (s *Server) intend(p claims.Planned, i int) (claims.Pending, error) {
+	token, err := newToken()
+	if err != nil {
+		return claims.Pending{}, err
 	}
+	rec := claims.Pending{Claim: p.Claim, Token: token, Temp: TempName(token, i)}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.active(p) {
+		return rec, errCancelled
+	}
+	return rec, s.commit(s.state.AddPending(rec))
+}
+
+// abort undoes a failed attach, newest first. Claims are forgotten and records kept first: a
+// device is never left without one. Each device is removed by its token, and its record goes
+// only once that removal is verified. Returns cause, with any cleanup failure joined to it.
+func (s *Server) abort(ns *os.File, joined []joinedPlan, cause error) error {
+	s.mu.Lock()
+	if len(joined) > 0 {
+		next := withoutJoined(s.state, joinedPlans(joined))
+		for _, j := range joined {
+			if !next.HasPending(j.rec.Netns, j.rec.Network) {
+				next = next.AddPending(j.rec)
+			}
+		}
+		// Devices stay up until this is saved: a claim-less save failure would let a restart
+		// forget a device that still exists.
+		if err := s.commitForced(next); err != nil {
+			s.mu.Unlock()
+			return errors.Join(cause, fmt.Errorf("save: %w", err))
+		}
+	}
+	s.mu.Unlock()
+	// Kernel work runs unlocked. Records of this netns are busy, so no other path touches them.
+	errs := []error{cause}
+	for i := len(joined) - 1; i >= 0; i-- {
+		j := joined[i]
+		if err := j.undo.restore(ns); err != nil {
+			log.Printf("restore defaults on %s: %v", j.plan.Interface, err)
+		}
+		gone, err := s.removeDevice(j.rec, ns)
+		if !gone {
+			errs = append(errs, fmt.Errorf("cleanup pending for %s: %w", claims.ShortID(j.rec.ID), err))
+			continue
+		}
+		if err := s.dropRecord(j.rec); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// dropRecord forgets rec once its device is verified gone. Takes mu.
+func (s *Server) dropRecord(rec claims.Pending) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commitForced(s.state.RemoveToken(rec.Token))
+}
+
+// joinedPlans are the plans of joined, in order.
+func joinedPlans(joined []joinedPlan) []claims.Planned {
 	plans := make([]claims.Planned, 0, len(joined))
 	for _, j := range joined {
 		plans = append(plans, j.plan)
 	}
-	s.mu.Lock()
-	if err := s.commit(withoutJoined(s.state, plans)); err != nil {
-		log.Printf("rollback: %v", err)
-	}
-	s.mu.Unlock()
-	for i := len(joined) - 1; i >= 0; i-- {
-		undoJoin(ns, joined[i].undo, joined[i].plan.Interface)
-	}
+	return plans
 }
 
-// withoutJoined is s minus the claims of ps.
+// withoutJoined is s minus the claims of ps. Records are kept.
 func withoutJoined(s claims.State, ps []claims.Planned) claims.State {
-	next := claims.State{Claims: []claims.Claim{}}
+	next := s
+	next.Claims = []claims.Claim{}
 	for _, c := range s.Claims {
 		if !slices.ContainsFunc(ps, func(p claims.Planned) bool { return p.Claim == c }) {
 			next.Claims = append(next.Claims, c)
@@ -336,15 +438,56 @@ func withoutJoined(s claims.State, ps []claims.Planned) claims.State {
 	return next
 }
 
-// undoJoin restores the defaults a join replaced, then deletes its device. Each failure is
-// logged: a device that will not go is the one thing the operator must see.
-func undoJoin(ns *os.File, undo defaultUndo, iface string) {
-	if err := undo.restore(ns); err != nil {
-		log.Printf("restore defaults on %s: %v", iface, err)
+// retire removes each record's device and drops the record once its removal is verified. A
+// record it could not verify keeps its record. Takes mu per record, not around the kernel work.
+func (s *Server) retire(recs []claims.Pending) error {
+	var errs []error
+	for _, rec := range recs {
+		gone, err := s.removeDevice(rec, nil)
+		if !gone {
+			errs = append(errs, fmt.Errorf("cleanup pending for %s: %w", claims.ShortID(rec.ID), err))
+			continue
+		}
+		if err := s.dropRecord(rec); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	if err := dropDevice(ns, iface); err != nil {
-		log.Printf("drop device %s: %v", iface, err)
+	return errors.Join(errs...)
+}
+
+// removeDevice reports whether rec's device is verified absent, using ns as its netns if given.
+// A record from an earlier boot is retired: its netns and devices went with the reboot.
+func (s *Server) removeDevice(rec claims.Pending, ns *os.File) (bool, error) {
+	if rec.BootID != s.boot {
+		return true, nil
 	}
+	if s.remove != nil {
+		return s.remove(rec)
+	}
+	return removeOwned(rec, ns)
+}
+
+// commitForced is commit for a change whose devices already moved: memory always takes it. A
+// refused save leaves the disk behind memory, so admissions wait until a save succeeds.
+func (s *Server) commitForced(next claims.State) error {
+	s.state = next
+	return s.save()
+}
+
+// save writes the state. A failure marks the server degraded until a later save succeeds.
+func (s *Server) save() error {
+	if err := claims.Save(s.cfg.State, s.state); err != nil {
+		s.degraded = true
+		return err
+	}
+	s.degraded = false
+	return nil
+}
+
+// recoverPending retries every record at start. Records it cannot verify stay for the next
+// attach or stop that conflicts with them.
+func (s *Server) recoverPending() error {
+	return s.retire(s.state.Pending)
 }
 
 // finish ends an attach: its netns is free again and its reservations are dropped.
@@ -375,7 +518,6 @@ func dropPending(pending []claims.Planned, p claims.Planned) []claims.Planned {
 
 func (s *Server) detach(uid uint32, id string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	// Stop an attach still running for this container, including one that only repeats joins.
 	// Its reservations stay until it finishes, since its devices are up until then.
 	for _, a := range s.busy {
@@ -383,13 +525,25 @@ func (s *Server) detach(uid uint32, id string) error {
 			a.stopped = true
 		}
 	}
-	return s.commit(s.state.Drop(uid, id))
+	errs := []error{s.commit(s.state.Drop(uid, id))}
+	// Records of an attach still running are left to that attach.
+	var recs []claims.Pending
+	for _, rec := range s.state.Pending {
+		if rec.UID == uid && rec.ID == id && s.busy[rec.Netns] == nil {
+			recs = append(recs, rec)
+		}
+	}
+	s.mu.Unlock()
+	errs = append(errs, s.retire(recs))
+	return errors.Join(errs...)
 }
 
+// commit saves next and makes it the state. A refused save changes nothing.
 func (s *Server) commit(next claims.State) error {
 	if err := claims.Save(s.cfg.State, next); err != nil {
 		return err
 	}
 	s.state = next
+	s.degraded = false
 	return nil
 }
