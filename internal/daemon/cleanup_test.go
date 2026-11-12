@@ -385,3 +385,14 @@ func TestDetachMidAttachLeavesNoClaim(t *testing.T) {
 		t.Fatalf("abort left claims %v, pending %v", s.state.Claims, s.state.Pending)
 	}
 }
+
+func TestParseNsfsMountsUnescapesPaths(t *testing.T) {
+	out := `36 25 0:33 / /run/netns/a\040b rw - nsfs nsfs rw
+37 25 0:34 / /run/netns/c\011d\012e\134f rw - nsfs nsfs rw
+`
+	got := parseNsfsMounts(out)
+	want := []string{"/run/netns/a b", "/run/netns/c\td\ne\\f"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

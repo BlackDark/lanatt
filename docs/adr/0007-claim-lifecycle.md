@@ -20,7 +20,7 @@ Transitions, each saved before the next step:
 - Retry: a record conflicting with an attach (same netns, or same address, address6 or MAC on its parent) is retried first. A stop retries the records of its container; start retries all.
 - Retirement: a record from an earlier boot is dropped without a removal attempt; the reboot took its netns.
 
-A record is verified absent when no device carries its token in the host namespace or in its netns, and no reference holds the netns: no process in it, no fd to it, and no nsfs bind mount of it. A netns with no reference is destroyed, and its devices went with it. Owner exit alone proves nothing; the reference check does not look at the owner.
+A record is verified absent when no device carries its token in the host namespace or in its netns, and the scan finds no visible reference to the netns: no task in it, no fd to it, and no nsfs bind mount in any task's mount namespace. A scan that finds none is taken as destroyed: the devices went with it. A task exiting mid-scan retries the scan, and a scan that keeps racing keeps the record. Owner exit alone proves nothing; the scan does not look at the owner.
 
 Known gap: the kernel can hold a netns with no visible reference (for example TIME_WAIT sockets). Its device, and address, survive until freed, and a conflicting attach in that window can be admitted. Accepted: no check here can see that reference, and waiting on a timer would only move the window.
 

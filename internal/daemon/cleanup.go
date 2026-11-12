@@ -129,16 +129,33 @@ func removeOwned(rec claims.Pending, ns *os.File) (bool, error) {
 
 // openNetns opens the netns with inode ino through any reference: a task in it, an fd to it, or
 // an nsfs mount of it in any mount namespace. setns is per thread, so every task is checked.
-// Each fd is checked after open, since a task can exit and its id be reused. A probe that fails
-// for any reason but a vanished task is an error, not absence.
+// A task exiting mid-scan may have hidden a reference, so the scan retries; if it keeps racing,
+// the result is errRaced, not absence.
 func openNetns(ino uint64) (*os.File, error) {
+	for range scanAttempts {
+		f, err := scanNetns(ino)
+		if !errors.Is(err, errRaced) {
+			return f, err
+		}
+	}
+	return nil, errRaced
+}
+
+// scanAttempts bounds how often a racing scan of openNetns is repeated.
+const scanAttempts = 3
+
+// scanNetns is one pass of openNetns. Each fd is checked after open, since a task can exit and its
+// id be reused. Any task that exits during the pass returns errRaced.
+func scanNetns(ino uint64) (*os.File, error) {
 	tasks, err := procTasks()
 	if err != nil {
 		return nil, err
 	}
+	raced := false
 	for _, t := range tasks {
 		f, ok, err := openIfNetns(t+"/ns/net", ino)
 		if exited(t, err) {
+			raced = true
 			continue
 		} else if err != nil {
 			return nil, err
@@ -150,14 +167,20 @@ func openNetns(ino uint64) (*os.File, error) {
 	for _, t := range tasks {
 		fds, err := os.ReadDir(t + "/fd")
 		if exited(t, err) {
+			raced = true
 			continue
 		} else if err != nil {
 			return nil, err
 		}
 		for _, fd := range fds {
 			path := t + "/fd/" + fd.Name()
+			// A closed fd no longer holds the netns. ENOENT here is not a race: the scan's own
+			// directory handle is listed and closed under it.
 			target, err := os.Readlink(path)
-			if exited(t, err) {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			} else if exited(t, err) {
+				raced = true
 				continue
 			} else if err != nil {
 				return nil, err
@@ -166,7 +189,10 @@ func openNetns(ino uint64) (*os.File, error) {
 				continue
 			}
 			f, ok, err := openIfNetns(path, ino)
-			if exited(t, err) {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			} else if exited(t, err) {
+				raced = true
 				continue
 			} else if err != nil {
 				return nil, err
@@ -178,7 +204,6 @@ func openNetns(ino uint64) (*os.File, error) {
 	}
 	// Every task is scanned: mountinfo lists only the mounts under that task's root, so a
 	// namespace's narrower-rooted task cannot stand in for a wider one.
-	raced := false
 	for _, t := range tasks {
 		data, err := os.ReadFile(t + "/mountinfo")
 		// A zombie has no namespaces left: its mountinfo fails with EINVAL, and it holds nothing.
@@ -290,10 +315,13 @@ func parseNsfsMounts(out string) []string {
 		if len(fl) < 5 || len(rf) == 0 || rf[0] != "nsfs" {
 			continue
 		}
-		mounts = append(mounts, strings.ReplaceAll(fl[4], `\040`, " "))
+		mounts = append(mounts, mountInfoUnescaper.Replace(fl[4]))
 	}
 	return mounts
 }
+
+// mountInfoUnescaper undoes the octal escapes the kernel uses in mountinfo paths.
+var mountInfoUnescaper = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
 
 // conflicts reports whether rec holds something req would take: its netns, or its address or
 // MAC on the same network or parent. A field that does not parse conflicts with nothing; Plan

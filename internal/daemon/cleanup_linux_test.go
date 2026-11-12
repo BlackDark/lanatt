@@ -16,9 +16,11 @@ func TestNetnsHeldByThreadIsFound(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// setns is per thread: only this OS thread holds the new netns, not the group leader.
+		// The thread keeps the test netns, so it stays locked: Go ends a locked thread whose
+		// goroutine exits, rather than reusing it with the netns changed.
 		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
 		if err := syscall.Unshare(syscall.CLONE_NEWNET); err != nil {
+			runtime.UnlockOSThread()
 			ready <- 0
 			return
 		}
