@@ -114,10 +114,11 @@ func Parse(data []byte) (Config, error) {
 		return Config{}, errors.New("config: uids is empty, so every caller would be refused")
 	}
 	driverOn := map[string]string{}
-	// Claims are checked per network, so two networks on one parent with overlapping prefixes
-	// would hand out the same address on one segment unseen. DAD only catches IPv6 while both are up.
-	v4On := map[string][]netip.Prefix{}
-	v6On := map[string][]netip.Prefix{}
+	// Claims are checked per network, so overlapping prefixes on one parent would hand out the same
+	// address on one segment unseen.
+	v4On := map[string][]placed{}
+	// DAD catches a duplicate IPv6 address only while both networks are up.
+	v6On := map[string][]placed{}
 	for _, rn := range raw.Networks {
 		n, err := parseNetwork(rn)
 		if err != nil {
@@ -130,23 +131,35 @@ func Parse(data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("config: network %q: parent %q already carries %s networks; macvlan and ipvlan cannot share a parent", n.Name, n.Parent, other)
 		}
 		driverOn[n.Parent] = n.Driver
-		for _, other := range v4On[n.Parent] {
-			if other.Overlaps(n.Prefix) {
-				return Config{}, fmt.Errorf("config: network %q: prefix %s overlaps %s on parent %q", n.Name, n.Prefix, other, n.Parent)
-			}
+		if other, ok := overlapping(v4On[n.Parent], n.Prefix); ok {
+			return Config{}, fmt.Errorf("config: network %q: prefix %s overlaps %s of network %q on parent %q", n.Name, n.Prefix, other.prefix, other.name, n.Parent)
 		}
-		v4On[n.Parent] = append(v4On[n.Parent], n.Prefix)
+		v4On[n.Parent] = append(v4On[n.Parent], placed{n.Name, n.Prefix})
 		if n.HasIPv6() {
-			for _, other := range v6On[n.Parent] {
-				if other.Overlaps(n.Prefix6) {
-					return Config{}, fmt.Errorf("config: network %q: prefix6 %s overlaps %s on parent %q", n.Name, n.Prefix6, other, n.Parent)
-				}
+			if other, ok := overlapping(v6On[n.Parent], n.Prefix6); ok {
+				return Config{}, fmt.Errorf("config: network %q: prefix6 %s overlaps %s of network %q on parent %q", n.Name, n.Prefix6, other.prefix, other.name, n.Parent)
 			}
-			v6On[n.Parent] = append(v6On[n.Parent], n.Prefix6)
+			v6On[n.Parent] = append(v6On[n.Parent], placed{n.Name, n.Prefix6})
 		}
 		cfg.Networks[n.Name] = n
 	}
 	return cfg, nil
+}
+
+// placed is a prefix already taken on a parent, and the network that took it.
+type placed struct {
+	name   string
+	prefix netip.Prefix
+}
+
+// overlapping returns the first taken prefix that overlaps p.
+func overlapping(taken []placed, p netip.Prefix) (placed, bool) {
+	for _, t := range taken {
+		if t.prefix.Overlaps(p) {
+			return t, true
+		}
+	}
+	return placed{}, false
 }
 
 func parseNetwork(rn rawNetwork) (Network, error) {
