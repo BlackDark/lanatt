@@ -81,21 +81,17 @@ func TestReserveHoldsAddressUntilFinished(t *testing.T) {
 	}
 }
 
-func TestSettleCommitsClaimAndFinishDropsReservation(t *testing.T) {
+func TestCompleteCommitsClaimAndDropsReservation(t *testing.T) {
 	s := reserveServer(t)
 	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settle(p[0]); err != nil {
+	if err := s.complete(1, p); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(s.pending, p[0]) {
-		t.Fatal("settle dropped the reservation: the device is still up")
-	}
-	s.finish(1, p)
 	if len(s.pending) != 0 {
-		t.Fatalf("reservation left after finish: %v", s.pending)
+		t.Fatalf("reservation left after complete: %v", s.pending)
 	}
 	saved, err := claims.Load(s.cfg.State)
 	if err != nil {
@@ -106,20 +102,19 @@ func TestSettleCommitsClaimAndFinishDropsReservation(t *testing.T) {
 	}
 }
 
-func TestSettledClaimKeepsAddress(t *testing.T) {
+func TestCompletedClaimKeepsAddress(t *testing.T) {
 	s := reserveServer(t)
 	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settle(p[0]); err != nil {
+	if err := s.complete(1, p); err != nil {
 		t.Fatal(err)
 	}
-	s.finish(1, p)
 	// Planned against the saved state directly: reserve would prune this fake owner first.
 	joins := attachReq("c2", "10.254.1.2", "02:00:00:00:00:03").Joins
 	if _, err := claims.Plan(s.state, s.cfg.Networks, 1000, "c2", 2, joins); err == nil {
-		t.Fatal("settled claim released its address")
+		t.Fatal("completed claim released its address")
 	}
 }
 
@@ -143,15 +138,6 @@ func TestCheckJoinRefusesCancelledAndLate(t *testing.T) {
 	}
 }
 
-func TestWithoutJoinedKeepsOtherClaims(t *testing.T) {
-	mine := claims.Claim{ID: "c1", Netns: 1, Network: "a", Interface: "lan0"}
-	other := claims.Claim{ID: "c2", Netns: 2, Network: "a", Interface: "lan0"}
-	got := withoutJoined(claims.State{Claims: []claims.Claim{mine, other}}, []claims.Planned{{Claim: mine}})
-	if len(got.Claims) != 1 || got.Claims[0] != other {
-		t.Fatalf("got %v", got.Claims)
-	}
-}
-
 func TestDetachCancelsButKeepsReservationUntilFinish(t *testing.T) {
 	s := reserveServer(t)
 	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
@@ -165,9 +151,6 @@ func TestDetachCancelsButKeepsReservationUntilFinish(t *testing.T) {
 	if !slices.Contains(s.pending, p[0]) {
 		t.Fatal("reservation dropped before the attach finished")
 	}
-	if err := s.settle(p[0]); err != errCancelled {
-		t.Fatalf("settle after stop: %v, want errCancelled", err)
-	}
 	if len(s.state.Claims) != 0 {
 		t.Fatalf("claim committed after stop: %v", s.state.Claims)
 	}
@@ -177,7 +160,7 @@ func TestDetachCancelsButKeepsReservationUntilFinish(t *testing.T) {
 	}
 }
 
-func TestSettleFailureKeepsReservation(t *testing.T) {
+func TestCompleteFailureKeepsReservation(t *testing.T) {
 	s := reserveServer(t)
 	p, err := s.reserve(1000, attachReq("c1", "10.254.1.2", "02:00:00:00:00:02"), target{netns: 1, start: "1"})
 	if err != nil {
@@ -189,8 +172,8 @@ func TestSettleFailureKeepsReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.cfg.State = filepath.Join(blocker, "claims.json")
-	if err := s.settle(p[0]); err == nil {
-		t.Fatal("settle saved into a blocked directory")
+	if err := s.complete(1, p); err == nil {
+		t.Fatal("complete saved into a blocked directory")
 	}
 	if !slices.Contains(s.pending, p[0]) {
 		t.Fatal("reservation dropped before the claim was saved")
@@ -203,14 +186,11 @@ func TestCompleteRefusesAfterStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.settle(p[0]); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.detach(1000, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	if !s.complete(1, p) {
-		t.Fatal("attach reported success after a stop")
+	if err := s.complete(1, p); err != errCancelled {
+		t.Fatalf("complete after stop: %v, want errCancelled", err)
 	}
 	if !slices.Contains(s.pending, p[0]) {
 		t.Fatal("refused attach released its reservation before its devices were undone")

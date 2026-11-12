@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/netip"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
@@ -44,63 +42,20 @@ func DecideRoute(hasDefault, wantDefault bool) RouteAction {
 	}
 }
 
-// TempName is the host-side name a device has until it is moved into the netns.
-func TempName(netns uint64, i int) string {
-	return fmt.Sprintf("lt%08x%d", uint32(netns), i)
-}
-
-var tempName = regexp.MustCompile(`^lt[0-9a-f]{8}[0-9]+$`)
-
-// StaleTemps picks lanatt's temporary devices out of `ip -o link show`. On the host, any such
-// device was left by a crash between create and move.
-func StaleTemps(out string) []string {
-	var names []string
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 {
-			continue
-		}
-		name, _, _ := strings.Cut(strings.TrimSuffix(f[1], ":"), "@")
-		if tempName.MatchString(name) {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-// reapTemps deletes temporary devices a crashed daemon left on the host, of any driver.
-func reapTemps() error {
-	out, err := run(nil, ipBin, "-o", "link", "show")
-	if err != nil {
-		return err
-	}
-	for _, name := range StaleTemps(out) {
-		if _, err := run(nil, ipBin, "link", "del", "dev", name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// join creates the device on the host, moves it into the netns, and configures it there.
-// join makes the attachment and returns what undoing its default routes takes; on failure it
-// removes the device and restores the defaults.
-func join(ns *os.File, n config.Network, p claims.Planned, tmp string) (defaultUndo, error) {
+// join creates the device on the host under tmp, marks it with token, moves it into the netns,
+// and configures it there. On failure the device is left for the caller to remove by token: the
+// caller holds the record that finds it.
+func join(ns *os.File, n config.Network, p claims.Planned, tmp, token string) (defaultUndo, error) {
 	if _, err := run(nil, ipBin, linkAddArgs(n, p, tmp)...); err != nil {
 		return defaultUndo{}, err
 	}
-	if _, err := run(ns, ipBin, "link", "set", "dev", tmp, "netns", nsPath); err != nil {
-		_, _ = run(nil, ipBin, "link", "del", "dev", tmp)
+	if _, err := run(nil, ipBin, "link", "set", "dev", tmp, "alias", aliasPrefix+token); err != nil {
 		return defaultUndo{}, err
 	}
-	name := tmp
-	undo, err := configure(ns, n, p, &name)
-	if err != nil {
-		if _, derr := inNetns(ns, "link", "del", "dev", name); derr != nil {
-			log.Printf("delete %s after failed join: %v", name, derr)
-		}
+	if _, err := run(ns, ipBin, "link", "set", "dev", tmp, "netns", nsPath); err != nil {
+		return defaultUndo{}, err
 	}
-	return undo, err
+	return configure(ns, n, p, tmp)
 }
 
 // linkAddArgs builds `ip link add` for the network's driver. Macvlan takes the MAC and runs in
@@ -125,15 +80,13 @@ func (u defaultUndo) restore(ns *os.File) error {
 	return restoreDefaults(ns, u.dev, u.written)
 }
 
-// configure sets *name to the device's current name so a failure deletes only our device.
-// Default routes change last. If a later step fails after one changed, the families that
-// changed are restored: deleting the device would otherwise take the new default with it, and
-// the replaced one was on another device.
-func configure(ns *os.File, n config.Network, p claims.Planned, name *string) (undo defaultUndo, err error) {
-	if _, err := inNetns(ns, "link", "set", "dev", *name, "name", p.Interface); err != nil {
+// configure renames the device tmp to its interface and sets it up. Default routes change last.
+// If a later step fails after one changed, the families that changed are restored: the device
+// is removed by the caller, which would otherwise take the new default with it.
+func configure(ns *os.File, n config.Network, p claims.Planned, tmp string) (undo defaultUndo, err error) {
+	if _, err := inNetns(ns, "link", "set", "dev", tmp, "name", p.Interface); err != nil {
 		return defaultUndo{}, err
 	}
-	*name = p.Interface
 	// Set before the link is up, so no RA is ever processed.
 	for _, kv := range ipv6Sysctls(n) {
 		if err := setIPv6(ns, p.Interface, kv[0], kv[1]); err != nil {
@@ -158,11 +111,15 @@ func configure(ns *os.File, n config.Network, p claims.Planned, name *string) (u
 	}
 	undo = defaultUndo{dev: p.Interface, written: map[string][]string{}}
 	defer func() {
-		if err != nil {
-			if rerr := undo.restore(ns); rerr != nil {
-				log.Printf("restore defaults on %s: %v", p.Interface, rerr)
-			}
+		if err == nil {
+			return
 		}
+		// A failed restore keeps undo, so abort retries it and reports the error.
+		if rerr := undo.restore(ns); rerr != nil {
+			err = errors.Join(err, rerr)
+			return
+		}
+		undo = defaultUndo{}
 	}()
 	replaced, wrote, err := setDefault(ns, "-4", n.Gateway, p.Interface, p.Default)
 	if err != nil {
@@ -288,12 +245,6 @@ func specArgs(f []string) []string {
 		}
 	}
 	return out
-}
-
-// dropDevice deletes iface in the netns, for a device that must not outlive its failed claim.
-func dropDevice(ns *os.File, iface string) error {
-	_, err := inNetns(ns, "link", "del", "dev", iface)
-	return err
 }
 
 // routeMetric is the metric of a route's arguments, or "" if it has none.
