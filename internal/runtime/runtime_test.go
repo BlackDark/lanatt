@@ -1,7 +1,7 @@
 package runtime
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 )
 
@@ -41,11 +41,13 @@ func TestInjectHooksKeepsSpecAndExistingHooks(t *testing.T) {
 		t.Fatalf("changed=%v err=%v", changed, err)
 	}
 	var spec struct {
-		Process struct{ Args []string }
-		Hooks   map[string][]struct {
-			Path string
-			Args []string
-		}
+		Process struct {
+			Args []string `json:"args"`
+		} `json:"process"`
+		Hooks map[string][]struct {
+			Path string   `json:"path"`
+			Args []string `json:"args"`
+		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(out, &spec); err != nil {
 		t.Fatal(err)

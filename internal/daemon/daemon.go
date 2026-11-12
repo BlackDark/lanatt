@@ -2,7 +2,8 @@
 package daemon
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -138,7 +139,7 @@ func (s *Server) serveConn(conn net.Conn) {
 	if err := s.respond(conn); err != nil {
 		resp = wire.Response{Error: err.Error()}
 	}
-	_ = json.NewEncoder(conn).Encode(resp)
+	_ = json.MarshalWrite(conn, resp)
 }
 
 func (s *Server) respond(conn net.Conn) error {
@@ -151,9 +152,8 @@ func (s *Server) respond(conn net.Conn) error {
 		return fmt.Errorf("uid %d is not allowed", uid)
 	}
 	var req wire.Request
-	dec := json.NewDecoder(io.LimitReader(conn, maxRequest))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	dec := jsontext.NewDecoder(io.LimitReader(conn, maxRequest))
+	if err := json.UnmarshalDecode(dec, &req, json.RejectUnknownMembers(true)); err != nil {
 		return fmt.Errorf("bad request: %w", err)
 	}
 	err = s.handle(uid, req)

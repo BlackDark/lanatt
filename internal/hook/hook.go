@@ -2,7 +2,8 @@
 package hook
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +28,7 @@ func Request(stage string, stdin io.Reader, readFile func(string) ([]byte, error
 		return nil, fmt.Errorf("unknown hook stage %q, want create or stop", stage)
 	}
 	var st State
-	if err := json.NewDecoder(stdin).Decode(&st); err != nil {
+	if err := json.UnmarshalDecode(jsontext.NewDecoder(stdin), &st); err != nil {
 		return nil, fmt.Errorf("OCI state: %w", err)
 	}
 	data, err := readFile(filepath.Join(st.Bundle, "config.json"))
@@ -50,13 +51,12 @@ func Request(stage string, stdin io.Reader, readFile func(string) ([]byte, error
 	// Strict: a misspelt field (say "ipv6") would otherwise join without it, silently. Trailing
 	// data would be ignored the same way, so the value must hold exactly one array.
 	var joins []wire.Join
-	dec := json.NewDecoder(strings.NewReader(value))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&joins); err != nil {
+	dec := jsontext.NewDecoder(strings.NewReader(value))
+	if err := json.UnmarshalDecode(dec, &joins, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("annotation %s: %w", wire.AnnotationKey, err)
 	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); err != io.EOF {
+	var extra jsontext.Value
+	if err := json.UnmarshalDecode(dec, &extra); err != io.EOF {
 		return nil, fmt.Errorf("annotation %s: data after the join array", wire.AnnotationKey)
 	}
 	return &wire.Request{Op: wire.OpAttach, ID: st.ID, Pid: st.Pid, Joins: joins}, nil

@@ -2,7 +2,8 @@
 package wire
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net"
 	"time"
@@ -26,14 +27,14 @@ type Join struct {
 	Address6  string `json:"address6,omitempty"`
 	MAC       string `json:"mac"`
 	Interface string `json:"interface,omitempty"`
-	Default   bool   `json:"default,omitempty"`
+	Default   bool   `json:"default,omitzero"`
 }
 
 // Request is the single JSON object a client sends.
 type Request struct {
 	Op    string `json:"op"`
 	ID    string `json:"id"`
-	Pid   int    `json:"pid,omitempty"`
+	Pid   int    `json:"pid,omitzero"`
 	Joins []Join `json:"joins,omitempty"`
 }
 
@@ -53,11 +54,11 @@ func Call(socket string, req Request, timeout time.Duration) error {
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	if err := json.MarshalWrite(conn, req); err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
 	var resp Response
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+	if err := json.UnmarshalDecode(jsontext.NewDecoder(conn), &resp); err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
 	if !resp.OK {

@@ -1,9 +1,9 @@
 package cnijournal
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"os"
 	"path/filepath"
@@ -25,7 +25,7 @@ type fakeRunner struct {
 	onDel func(Record)
 }
 
-func (f *fakeRunner) Add(_ context.Context, r Record) (json.RawMessage, error) {
+func (f *fakeRunner) Add(_ context.Context, r Record) (jsontext.Value, error) {
 	f.adds = append(f.adds, r.ContainerID)
 	if f.onAdd != nil {
 		f.onAdd()
@@ -33,7 +33,7 @@ func (f *fakeRunner) Add(_ context.Context, r Record) (json.RawMessage, error) {
 	if f.addErr != nil {
 		return nil, f.addErr
 	}
-	return json.RawMessage(`{"cniVersion":"1.0.0"}`), nil
+	return jsontext.Value(`{"cniVersion":"1.0.0"}`), nil
 }
 
 func (f *fakeRunner) Del(_ context.Context, r Record, gone bool) error {
@@ -47,7 +47,7 @@ func (f *fakeRunner) Del(_ context.Context, r Record, gone bool) error {
 
 func rec(uid uint32, id string) Record {
 	return Record{UID: uid, ContainerID: id, Interface: "lan0", Network: "lan",
-		Plugin: "macvlan", PluginVersion: "1.1.1", Config: json.RawMessage(`{"type":"macvlan"}`)}
+		Plugin: "macvlan", PluginVersion: "1.1.1", Config: jsontext.Value(`{"type":"macvlan"}`)}
 }
 
 func open(t *testing.T, dir string) *Store {
@@ -77,9 +77,9 @@ func mustGet(t *testing.T, s *Store, uid uint32, id string) (Record, bool) {
 func noneGone(Record) bool { return false }
 
 // sameJSON compares ignoring the indentation the store adds.
-func sameJSON(a, b json.RawMessage) bool {
-	var x, y bytes.Buffer
-	return json.Compact(&x, a) == nil && json.Compact(&y, b) == nil && x.String() == y.String()
+func sameJSON(a, b jsontext.Value) bool {
+	x, y := a.Clone(), b.Clone()
+	return x.Compact() == nil && y.Compact() == nil && x.String() == y.String()
 }
 
 func TestCNIIDStableScopedAndCharset(t *testing.T) {
