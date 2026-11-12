@@ -96,6 +96,38 @@ func TestParseRefusesMixedDriversOnParent(t *testing.T) {
 	}
 }
 
+func TestParseOverlappingPrefixOnParent(t *testing.T) {
+	net := func(name, parent, prefix, gw string) string {
+		return `{"name":"` + name + `","parent":"` + parent + `","prefix":"` + prefix + `","gateway":"` + gw + `","driver":"macvlan"}`
+	}
+	refused := map[string]string{
+		"nested, wide first":   net("a", "d0", "10.254.1.0/24", "10.254.1.1") + "," + net("b", "d0", "10.254.1.0/28", "10.254.1.14"),
+		"nested, narrow first": net("a", "d0", "10.254.1.0/28", "10.254.1.14") + "," + net("b", "d0", "10.254.1.0/24", "10.254.1.1"),
+		"equal":                net("a", "d0", "10.254.1.0/28", "10.254.1.14") + "," + net("b", "d0", "10.254.1.0/28", "10.254.1.14"),
+	}
+	for name, nets := range refused {
+		_, err := Parse([]byte(`{"uids":[1000],"networks":[` + nets + `]}`))
+		for _, want := range []string{`network "a"`, `network "b"`} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: want error naming %s, got %v", name, want, err)
+			}
+		}
+	}
+	admitted := map[string]string{
+		"disjoint on one parent":   net("a", "d0", "10.254.1.0/28", "10.254.1.14") + "," + net("b", "d0", "10.254.1.16/28", "10.254.1.30"),
+		"same prefix, two parents": net("a", "d0", "10.254.1.0/28", "10.254.1.14") + "," + net("b", "d1", "10.254.1.0/28", "10.254.1.14"),
+		// The layout test/accept.sh uses on one parent.
+		"accept layout": net("lab", "d0", "10.254.1.0/28", "10.254.1.14") + "," +
+			`{"name":"lab2","parent":"d0","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]}` + "," +
+			`{"name":"lab6","parent":"d0","prefix":"10.254.1.48/28","gateway":"10.254.1.62","driver":"macvlan","prefix6":"fd77:254::/64","gateway6":"fd77:254::1"}`,
+	}
+	for name, nets := range admitted {
+		if _, err := Parse([]byte(`{"uids":[1000],"networks":[` + nets + `]}`)); err != nil {
+			t.Errorf("%s refused: %v", name, err)
+		}
+	}
+}
+
 func TestParseRefusesOverlappingPrefix6OnParent(t *testing.T) {
 	_, err := Parse([]byte(`{"uids":[1000],"networks":[
 		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:10::/64"},

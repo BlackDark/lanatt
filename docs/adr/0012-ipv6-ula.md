@@ -13,7 +13,7 @@ The reasons are measured, not guessed. On a dual-stack LAN a fresh netns has `ac
 - **Container.** The daemon's `/proc/sys` is read-only by default. `prefix6` needs `--security-opt unmask=/proc/sys` (verified on the VM: the write fails without it).
 - **DAD.** After `addr add`, lanatt waits until the address is preferred. `dadfailed` refuses the join: the device is deleted and no claim is written.
 - **Routes per family** (ADR-0005). A v6 default needs `gateway6` and the attachment's `address6`. `default: true` replaces the default in each family the attachment serves.
-- **Overlap.** Two networks on one parent cannot have overlapping `prefix6`: the same ULA address would sit on one segment, and DAD sees it only while both are up.
+- **Overlap.** Two networks on one parent cannot have overlapping `prefix6`: the same ULA address would sit on one segment, and DAD sees it only while both are up. The IPv4 rule is in ADR-0003.
 - **No `ranges6` in v1.** The whole `prefix6` is claimable. Keep the admin's hosts out of it by choosing the prefix.
 
 ## Limits
