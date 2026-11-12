@@ -174,13 +174,11 @@ func scanNetns(ino uint64) (*os.File, error) {
 		}
 		for _, fd := range fds {
 			path := t + "/fd/" + fd.Name()
-			// A closed fd no longer holds the netns. ENOENT here is not a race: the scan's own
-			// directory handle is listed and closed under it.
+			// A closed fd no longer holds the netns, so its ENOENT is not a race. The scan's own
+			// directory handle shows up in its listing and closes under it. A vanished task is.
 			target, err := os.Readlink(path)
 			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			} else if exited(t, err) {
-				raced = true
+				raced = raced || taskGone(t)
 				continue
 			} else if err != nil {
 				return nil, err
@@ -188,10 +186,9 @@ func scanNetns(ino uint64) (*os.File, error) {
 			if target != fmt.Sprintf("net:[%d]", ino) {
 				continue
 			}
+			// The fd matched when read, so a failed open is a reference we could not confirm.
 			f, ok, err := openIfNetns(path, ino)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			} else if exited(t, err) {
+			if exited(t, err) {
 				raced = true
 				continue
 			} else if err != nil {
@@ -232,6 +229,12 @@ func scanNetns(ino uint64) (*os.File, error) {
 		return nil, errRaced
 	}
 	return nil, errNoReference
+}
+
+// taskGone reports whether the task directory dir no longer exists.
+func taskGone(dir string) bool {
+	_, err := os.Stat(dir)
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 // exited reports whether err came from a task that has exited, given its /proc directory dir.
