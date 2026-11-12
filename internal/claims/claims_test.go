@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lanatt/internal/config"
@@ -93,8 +94,21 @@ func TestOtherNetnsClashRefused(t *testing.T) {
 		}
 	}
 	other := wire.Join{Network: "b", Address: "10.254.2.2", MAC: j1.MAC}
-	if _, err := Plan(s, nets(t), 1000, "d", 2, []wire.Join{other}); err != nil {
-		t.Errorf("same MAC on another network refused: %v", err)
+	if _, err := Plan(s, nets(t), 1000, "d", 2, []wire.Join{other}); err == nil || !strings.Contains(err.Error(), "MAC "+j1.MAC+" is taken") {
+		t.Errorf("same MAC on another network of the same parent: %v", err)
+	}
+}
+
+func TestSameMACOnOtherParentAdmitted(t *testing.T) {
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"c","parent":"d1","prefix":"10.254.3.0/28","gateway":"10.254.3.14","driver":"macvlan"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := admit(t, State{}, "c", 1, j1)
+	if _, err := Plan(s, cfg.Networks, 1000, "d", 2, []wire.Join{{Network: "c", Address: "10.254.3.2", MAC: j1.MAC}}); err != nil {
+		t.Errorf("same MAC on another parent refused: %v", err)
 	}
 }
 
@@ -220,11 +234,11 @@ func TestRefusalNamesHolder(t *testing.T) {
 	}{
 		"address": {
 			wire.Join{Network: "a", Address: "10.254.1.2", MAC: "02:00:00:00:00:09"},
-			`network "a": address 10.254.1.2 is taken by claim a6eabd1adc12 (uid 1001, netns 4026532504, lan0, pid 4711)`,
+			`network "a": address 10.254.1.2 is taken by claim a6eabd1adc12 (uid 1001, netns 4026532504, network a, lan0, pid 4711)`,
 		},
 		"MAC": {
 			wire.Join{Network: "a", Address: "10.254.1.3", MAC: "02:00:00:00:00:02"},
-			`network "a": MAC 02:00:00:00:00:02 is taken by claim a6eabd1adc12 (uid 1001, netns 4026532504, lan0, pid 4711)`,
+			`network "a": MAC 02:00:00:00:00:02 is taken by claim a6eabd1adc12 (uid 1001, netns 4026532504, network a, lan0, pid 4711)`,
 		},
 	}
 	for name, c := range cases {
@@ -235,9 +249,17 @@ func TestRefusalNamesHolder(t *testing.T) {
 	}
 }
 
+func TestHolderWithoutInterface(t *testing.T) {
+	// A claim planned earlier in the same request has no interface yet.
+	c := Claim{ID: "short", UID: 1, Netns: 2, Network: "x"}
+	if got := Holder(c); got != "claim short (uid 1, netns 2, network x)" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestHolderWithoutOwnerPid(t *testing.T) {
-	c := Claim{ID: "short", UID: 1, Netns: 2, Interface: "lan1"}
-	if got := Holder(c); got != "claim short (uid 1, netns 2, lan1)" {
+	c := Claim{ID: "short", UID: 1, Netns: 2, Network: "x", Interface: "lan1"}
+	if got := Holder(c); got != "claim short (uid 1, netns 2, network x, lan1)" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -387,5 +409,62 @@ func TestAddress6RetryMustMatch(t *testing.T) {
 	noV6.Address6 = ""
 	if _, err := Plan(s, nets6(), 1000, "c", 1, []wire.Join{noV6}); err == nil {
 		t.Fatal("retry that drops address6 admitted")
+	}
+}
+
+func TestStaleClaimBlocksMAC(t *testing.T) {
+	s := admit(t, State{}, "c", 1, j1)
+	s.Claims[0].Network = "gone"
+	if _, err := Plan(s, nets(t), 1000, "d", 2, []wire.Join{{Network: "b", Address: "10.254.2.2", MAC: j1.MAC}}); err == nil {
+		t.Error("MAC of a claim on an unconfigured network admitted")
+	}
+}
+
+func TestMACRefusalsNameHolder(t *testing.T) {
+	s := admit(t, State{}, "c", 1, j1)
+	// Same netns, other network: the MAC is refused, not the netns re-join.
+	if _, err := Plan(s, nets(t), 1000, "c", 1, []wire.Join{{Network: "b", Address: "10.254.2.2", MAC: j1.MAC}}); err == nil || !strings.Contains(err.Error(), "MAC 02:00:00:00:00:02 is taken by claim") {
+		t.Errorf("same netns, other network: %v", err)
+	}
+}
+
+func TestSameMACOnTwoParentsWithinOneRequest(t *testing.T) {
+	cfg, err := config.Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"c","parent":"d1","prefix":"10.254.3.0/28","gateway":"10.254.3.14","driver":"macvlan"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joins := []wire.Join{
+		{Network: "a", Address: "10.254.1.2", MAC: j1.MAC},
+		{Network: "c", Address: "10.254.3.2", MAC: j1.MAC},
+	}
+	if _, err := Plan(State{}, cfg.Networks, 1000, "c", 1, joins); err != nil {
+		t.Errorf("same MAC on two parents in one request refused: %v", err)
+	}
+}
+
+func TestMACRepeatedWithinOneRequest(t *testing.T) {
+	joins := []wire.Join{
+		{Network: "a", Address: "10.254.1.2", MAC: j1.MAC},
+		{Network: "b", Address: "10.254.2.2", MAC: j1.MAC},
+	}
+	if _, err := Plan(State{}, nets(t), 1000, "c", 1, joins); err == nil || !strings.Contains(err.Error(), "MAC "+j1.MAC+" is taken") {
+		t.Errorf("same MAC on two networks of one parent in one request: %v", err)
+	}
+}
+
+// State saved before the MAC rule can hold one MAC twice; a re-join of the holder must still succeed
+// whatever the claim order.
+func TestRejoinIgnoresLegacyDuplicateMAC(t *testing.T) {
+	own := admit(t, State{}, "c", 1, j1).Claims[0]
+	other := Claim{ID: "d", UID: 1000, Netns: 2, Network: "b", Address: netip.MustParseAddr("10.254.2.2"), MAC: j1.MAC, Interface: "lan0"}
+	sameNetns := other
+	sameNetns.Netns, sameNetns.ID = 1, "c"
+	for _, claims := range [][]Claim{{other, own}, {own, other}, {sameNetns, own}, {own, sameNetns}} {
+		p, err := Plan(State{Claims: claims}, nets(t), 1000, "c", 1, []wire.Join{j1})
+		if err != nil || !p[0].Existing {
+			t.Errorf("re-join with legacy duplicate MAC %+v: existing=%v err=%v", claims, err == nil && p[0].Existing, err)
+		}
 	}
 }
