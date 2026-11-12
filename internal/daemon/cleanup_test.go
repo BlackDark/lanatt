@@ -279,3 +279,26 @@ func TestNoReferenceMeansAbsentNetns(t *testing.T) {
 		t.Fatalf("unreferenced netns: %v, want errNoReference", err)
 	}
 }
+
+func TestDetachKeepsClaimOfBusyNetns(t *testing.T) {
+	s := reserveServer(t)
+	var calls int
+	s.remove = failingRemove(&calls)
+	p, rec := intendOne(t, s, "c1", "10.254.1.2", "02:00:00:00:00:02", 1)
+	if err := s.settle(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.detach(1000, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	// The device is up until abort: its claim must not go before its record is written.
+	if len(s.state.Claims) != 1 {
+		t.Fatalf("detach dropped a busy claim: %v", s.state.Claims)
+	}
+	if err := s.abort(nil, []joinedPlan{{plan: p, rec: rec}}, errCancelled); err == nil {
+		t.Fatal("abort reported clean with an unverified device")
+	}
+	if len(s.state.Claims) != 0 || !s.state.HasPending(1, "a") {
+		t.Fatalf("abort left claims %v, pending %v", s.state.Claims, s.state.Pending)
+	}
+}

@@ -525,8 +525,15 @@ func (s *Server) detach(uid uint32, id string) error {
 			a.stopped = true
 		}
 	}
-	// Records of an attach still running are left to that attach.
-	if err := s.commit(s.state.Drop(uid, id)); err != nil {
+	// Claims and records of a busy netns are left to its attach: abort forgets the claims and
+	// keeps the records in one save, so no claim is dropped while its device is up.
+	next := s.state.Drop(uid, id)
+	for _, c := range s.state.Claims {
+		if c.UID == uid && c.ID == id && s.busy[c.Netns] != nil {
+			next.Claims = append(next.Claims, c)
+		}
+	}
+	if err := s.commit(next); err != nil {
 		s.mu.Unlock()
 		return err
 	}
