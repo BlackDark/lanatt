@@ -124,17 +124,18 @@ func removeOwned(rec claims.Pending, ns *os.File) (bool, error) {
 	return true, nil
 }
 
-// openNetns opens the netns with inode ino through any reference: a process in it, an fd to it,
-// or an nsfs mount of it. Each fd is checked after open, since a pid can exit and be reused.
-// A probe that fails for any reason but a vanished pid or path is an error, not absence.
+// openNetns opens the netns with inode ino through any reference: a task in it, an fd to it, or
+// an nsfs mount of it in any mount namespace. setns is per thread, so every task is checked.
+// Each fd is checked after open, since a task can exit and its id be reused. A probe that fails
+// for any reason but a vanished task is an error, not absence.
 func openNetns(ino uint64) (*os.File, error) {
-	pids, err := procPids()
+	tasks, err := procTasks()
 	if err != nil {
 		return nil, err
 	}
-	for _, pid := range pids {
-		f, ok, err := openIfNetns(fmt.Sprintf("/proc/%d/ns/net", pid), ino)
-		if exited(pid, err) {
+	for _, t := range tasks {
+		f, ok, err := openIfNetns(t+"/ns/net", ino)
+		if exited(t, err) {
 			continue
 		} else if err != nil {
 			return nil, err
@@ -143,17 +144,17 @@ func openNetns(ino uint64) (*os.File, error) {
 			return f, nil
 		}
 	}
-	for _, pid := range pids {
-		fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
-		if exited(pid, err) {
+	for _, t := range tasks {
+		fds, err := os.ReadDir(t + "/fd")
+		if exited(t, err) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
 		for _, fd := range fds {
-			path := fmt.Sprintf("/proc/%d/fd/%s", pid, fd.Name())
+			path := t + "/fd/" + fd.Name()
 			target, err := os.Readlink(path)
-			if exited(pid, err) {
+			if exited(t, err) {
 				continue
 			} else if err != nil {
 				return nil, err
@@ -162,7 +163,7 @@ func openNetns(ino uint64) (*os.File, error) {
 				continue
 			}
 			f, ok, err := openIfNetns(path, ino)
-			if exited(pid, err) {
+			if exited(t, err) {
 				continue
 			} else if err != nil {
 				return nil, err
@@ -172,34 +173,51 @@ func openNetns(ino uint64) (*os.File, error) {
 			}
 		}
 	}
-	mounts, err := nsfsMounts()
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range mounts {
-		f, ok, err := openIfNetns(m, ino)
-		if errors.Is(err, fs.ErrNotExist) {
+	seen := map[string]bool{}
+	for _, t := range tasks {
+		mntNs, err := os.Readlink(t + "/ns/mnt")
+		if exited(t, err) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-		if ok {
-			return f, nil
+		if seen[mntNs] {
+			continue
+		}
+		seen[mntNs] = true
+		data, err := os.ReadFile(t + "/mountinfo")
+		if exited(t, err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		// A task's /root is its mount namespace's root, so mount points resolve in that namespace.
+		for _, m := range parseNsfsMounts(string(data)) {
+			f, ok, err := openIfNetns(t+"/root"+m, ino)
+			if exited(t, err) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
+			if ok {
+				return f, nil
+			}
 		}
 	}
 	return nil, errNoReference
 }
 
-// exited reports whether err came from a pid that has exited. Linux returns EACCES, not ENOENT,
-// for /proc/<pid>/ns/net of a dead task, so the pid is checked too. A live pid's error is real.
-func exited(pid int, err error) bool {
+// exited reports whether err came from a task that has exited, given its /proc directory dir.
+// Linux returns EACCES, not ENOENT, for ns links of a dead task, so dir is checked too.
+// An error from a live task is real.
+func exited(dir string, err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return true
 	}
-	_, statErr := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	_, statErr := os.Stat(dir)
 	return errors.Is(statErr, fs.ErrNotExist)
 }
 
@@ -236,13 +254,26 @@ func procPids() ([]int, error) {
 	return pids, nil
 }
 
-// nsfsMounts lists the mount points of nsfs filesystems, which bind-mount netns.
-func nsfsMounts() ([]string, error) {
-	data, err := os.ReadFile("/proc/self/mountinfo")
+// procTasks lists the /proc directory of every task: each thread of each process.
+func procTasks() ([]string, error) {
+	pids, err := procPids()
 	if err != nil {
 		return nil, err
 	}
-	return parseNsfsMounts(string(data)), nil
+	var tasks []string
+	for _, pid := range pids {
+		dir := fmt.Sprintf("/proc/%d", pid)
+		tids, err := os.ReadDir(dir + "/task")
+		if exited(dir, err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		for _, tid := range tids {
+			tasks = append(tasks, dir+"/task/"+tid.Name())
+		}
+	}
+	return tasks, nil
 }
 
 // parseNsfsMounts picks the mount points of nsfs entries in mountinfo output.
