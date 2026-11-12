@@ -165,39 +165,14 @@ func scanNetns(ino uint64) (*os.File, error) {
 		}
 	}
 	for _, t := range tasks {
-		fds, err := os.ReadDir(t + "/fd")
-		if exited(t, err) {
-			raced = true
-			continue
-		} else if err != nil {
+		f, fdRaced, err := scanFds(t, ino)
+		if err != nil {
 			return nil, err
 		}
-		for _, fd := range fds {
-			path := t + "/fd/" + fd.Name()
-			// A closed fd no longer holds the netns, so its ENOENT is not a race. The scan's own
-			// directory handle shows up in its listing and closes under it. A vanished task is.
-			target, err := os.Readlink(path)
-			if errors.Is(err, fs.ErrNotExist) {
-				raced = raced || taskGone(t)
-				continue
-			} else if err != nil {
-				return nil, err
-			}
-			if target != fmt.Sprintf("net:[%d]", ino) {
-				continue
-			}
-			// The fd matched when read, so a failed open is a reference we could not confirm.
-			f, ok, err := openIfNetns(path, ino)
-			if exited(t, err) {
-				raced = true
-				continue
-			} else if err != nil {
-				return nil, err
-			}
-			if ok {
-				return f, nil
-			}
+		if f != nil {
+			return f, nil
 		}
+		raced = raced || fdRaced
 	}
 	// Every task is scanned: mountinfo lists only the mounts under that task's root, so a
 	// namespace's narrower-rooted task cannot stand in for a wider one.
@@ -229,6 +204,49 @@ func scanNetns(ino uint64) (*os.File, error) {
 		return nil, errRaced
 	}
 	return nil, errNoReference
+}
+
+// scanFds looks for an fd of task t that is the netns ino. The fd directory stays open while its
+// links are read, so the scan's own handle never shows as closed; an fd that closes mid-scan is a
+// race, since it may have been duplicated into a task scanned earlier.
+func scanFds(t string, ino uint64) (f *os.File, raced bool, err error) {
+	dir, err := os.Open(t + "/fd")
+	if exited(t, err) {
+		return nil, true, nil
+	} else if err != nil {
+		return nil, false, err
+	}
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
+	if exited(t, err) {
+		return nil, true, nil
+	} else if err != nil {
+		return nil, false, err
+	}
+	for _, name := range names {
+		path := t + "/fd/" + name
+		target, err := os.Readlink(path)
+		if exited(t, err) {
+			raced = true
+			continue
+		} else if err != nil {
+			return nil, false, err
+		}
+		if target != fmt.Sprintf("net:[%d]", ino) {
+			continue
+		}
+		f, ok, err := openIfNetns(path, ino)
+		if exited(t, err) || (err == nil && !ok) {
+			raced = true
+			continue
+		} else if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return f, false, nil
+		}
+	}
+	return nil, raced, nil
 }
 
 // taskGone reports whether the task directory dir no longer exists.
