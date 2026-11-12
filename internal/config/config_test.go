@@ -96,6 +96,27 @@ func TestParseRefusesMixedDriversOnParent(t *testing.T) {
 	}
 }
 
+func TestParseRefusesOverlappingPrefixOnParent(t *testing.T) {
+	_, err := Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"b","parent":"d0","prefix":"10.254.1.0/24","gateway":"10.254.1.1","driver":"macvlan"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "overlaps") {
+		t.Fatalf("overlapping prefix on one parent: %v", err)
+	}
+	_, err = Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"b","parent":"d0","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan"}]}`))
+	if err != nil {
+		t.Fatalf("disjoint prefix on one parent refused: %v", err)
+	}
+	_, err = Parse([]byte(`{"uids":[1000],"networks":[
+		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"},
+		{"name":"b","parent":"d1","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"}]}`))
+	if err != nil {
+		t.Fatalf("same prefix on different parents refused: %v", err)
+	}
+}
+
 func TestParseRefusesOverlappingPrefix6OnParent(t *testing.T) {
 	_, err := Parse([]byte(`{"uids":[1000],"networks":[
 		{"name":"a","parent":"d0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan","prefix6":"fd00:10::/64"},
