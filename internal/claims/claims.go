@@ -18,10 +18,13 @@ import (
 // The owner fields name the process that asked for it; the claim lives only while that
 // process still exists in the same netns, in the same boot.
 type Claim struct {
-	ID        string     `json:"id"`
-	UID       uint32     `json:"uid"`
-	Netns     uint64     `json:"netns"`
-	Network   string     `json:"network"`
+	ID      string `json:"id"`
+	UID     uint32 `json:"uid"`
+	Netns   uint64 `json:"netns"`
+	Network string `json:"network"`
+	// Parent is the NIC the device was made on. It is kept when the network is edited, so the MAC
+	// check still names that NIC. Empty in state saved before this field.
+	Parent    string     `json:"parent"`
 	Address   netip.Addr `json:"address"`
 	Address6  netip.Addr `json:"address6"`
 	MAC       string     `json:"mac"`
@@ -127,7 +130,7 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 	if j.Interface != "" && !config.ValidInterfaceName(j.Interface) {
 		return Planned{}, fmt.Errorf("interface %q is not a valid name", j.Interface)
 	}
-	want := Claim{ID: id, UID: uid, Netns: netns, Network: n.Name, Address: addr, Address6: addr6, MAC: mac, Interface: j.Interface}
+	want := Claim{ID: id, UID: uid, Netns: netns, Network: n.Name, Parent: n.Parent, Address: addr, Address6: addr6, MAC: mac, Interface: j.Interface}
 	for _, c := range s.Claims {
 		if c.Network == n.Name && c.Netns == netns {
 			if c.Address != addr || c.Address6 != addr6 || c.MAC != mac {
@@ -150,19 +153,19 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 		if c.Network == n.Name && addr6.IsValid() && c.Address6 == addr6 {
 			return Planned{}, fmt.Errorf("address6 %s is taken by %s", addr6, Holder(c))
 		}
-		// A MAC is unique on the segment, so the check spans every network on the parent.
-		if mac != "" && c.MAC == mac && mayShareParent(nets, c.Network, n.Parent) {
+		// The check is per parent NIC. Two NICs on one switch are not checked (known gap, ADR-0012).
+		if mac != "" && c.MAC == mac && mayShareParent(c, n.Parent) {
 			return Planned{}, fmt.Errorf("MAC %s is taken by %s", mac, Holder(c))
 		}
 	}
 	return Planned{Claim: want, Default: j.Default}, nil
 }
 
-// mayShareParent reports whether the named network may sit on parent. A claim on a network
-// no longer configured may still hold its MAC on its parent, so it counts.
-func mayShareParent(nets map[string]config.Network, name, parent string) bool {
-	n, ok := nets[name]
-	return !ok || n.Parent == parent
+// mayShareParent reports whether claim c may hold its MAC on parent. Current config is not
+// used: a live device stays on the parent it was made on. A claim without a recorded parent
+// may be on any parent, so it counts everywhere.
+func mayShareParent(c Claim, parent string) bool {
+	return c.Parent == "" || c.Parent == parent
 }
 
 // planAddr6 checks an optional IPv6 address. Zero means the join asks for none.

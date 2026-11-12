@@ -24,7 +24,7 @@ lanatt daemon -config /etc/lanatt/config.json
 - `socket` and `state` default to the values above. `state` is on tmpfs: attachments do not survive a reboot, so claims must not either.
 - `uids` is the allowlist. `0` is refused there. An empty list fails at load unless `allowRoot` is set.
 - `allowRoot` (default `false`) accepts UID 0 callers, the hooks of rootful containers. A root caller may join any pid's netns except the host's; every other check applies. See ADR-0009.
-- `driver` is `macvlan` (bridge mode, each attachment has its own MAC) or `ipvlan` (L2 mode, no MAC: attachments share the parent's). See ADR-0011. A parent carries one driver: macvlan and ipvlan networks cannot share a `parent`. A caller-chosen MAC must be unique among attachments on the same `parent`, whatever the network; a join that reuses one is refused.
+- `driver` is `macvlan` (bridge mode, each attachment has its own MAC) or `ipvlan` (L2 mode, no MAC: attachments share the parent's). See ADR-0011. A parent carries one driver: macvlan and ipvlan networks cannot share a `parent`. A caller-chosen MAC must be unique among attachments on the parent NIC each was made on, whatever the network; a join that reuses one is refused. Two parent NICs on one switch are not checked against each other.
 - Two networks on one `parent` cannot have overlapping `prefix`; a config that does is refused at load.
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
@@ -59,7 +59,7 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 - A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and nothing is left behind.
 - IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
 - A refused attach (`an attach to this netns is already in progress`, `attach ran past its time budget`, `attach cancelled by a stop for the same container`) leaves no device behind. Its claims are dropped too, unless a failed state save keeps one until its owner exits. Retrying is safe.
-- The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on any network of the same `parent`. A claim on a network no longer configured has no known parent, so it blocks its MAC on every parent.
+- The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on the parent that attachment was made on, even if its network has been edited or removed since. A claim saved before parents were recorded has no known parent, so it blocks its MAC on every parent.
 
 ## Debugging claims
 
@@ -78,7 +78,7 @@ b7fbce2bed23  1001  lan      10.0.1.52  02:42:0a:00:01:34  lan0   4026532505  pr
 - `BOOT` is `this` for the current boot, `previous` for an earlier one, `unknown` for a legacy claim with no boot id.
 - `OWNER` is `pid/comm` of the owner while it is alive, a bare pid if its name cannot be read, or `none` when the claim is dead.
 - `REASON` is why a claim is dead: `other boot`, `owner gone`, `owner pid reused`, `netns changed`, or `no owner recorded`. `-` when alive.
-- `-json` prints an array of claim objects with every claim field (`id`, `uid`, `netns`, `network`, `address`, `address6`, `mac`, `interface`, `boot_id`, `owner_pid`, `owner_start`), plus `alive`, `reason` (empty when alive) and `owner_comm`. The table's short id and labels are not used. An empty state prints `[]`.
+- `-json` prints an array of claim objects with every claim field (`id`, `uid`, `netns`, `network`, `parent`, `address`, `address6`, `mac`, `interface`, `boot_id`, `owner_pid`, `owner_start`), plus `alive`, `reason` (empty when alive) and `owner_comm`. The table's short id and labels are not used. An empty state prints `[]`.
 
 ## Container image
 
