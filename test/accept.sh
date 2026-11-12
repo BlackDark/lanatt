@@ -47,6 +47,7 @@ cat >"$CFG" <<EOF
  "networks":[{"name":"lab","parent":"$PARENT","prefix":"10.254.1.0/28","gateway":"$GW","driver":"macvlan"},
   {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]},
   {"name":"lab6","parent":"$PARENT","prefix":"10.254.1.48/28","gateway":"10.254.1.62","driver":"macvlan","prefix6":"fd77:254::/64","gateway6":"fd77:254::1"},
+  {"name":"lab4","parent":"$PARENT","prefix":"10.254.1.64/28","gateway":"10.254.1.78","driver":"macvlan","noSLAAC":true},
   {"name":"vl","parent":"$PARENT2","prefix":"10.254.1.32/28","gateway":"10.254.1.46","driver":"ipvlan"}]}
 EOF
 
@@ -261,6 +262,25 @@ in_ns $S4 link set d0 up
 in_ns $S4 -6 route add default via fd77:255::1 dev d0 metric 100 onlink
 check "replacing join with default true" "hook $U create cs4 $S4 '[{\"network\":\"lab6\",\"address\":\"10.254.1.60\",\"mac\":\"02:42:0a:fe:01:60\",\"address6\":\"fd77:254::60\",\"default\":true}]'"
 check "one v6 default left, on lan0" "[[ \$(in_ns $S4 -6 route show default | wc -l) -eq 1 ]] && in_ns $S4 -6 route show default | grep -q 'via fd77:254::1 dev lan0.* metric 100'"
+
+# 20. noSLAAC (ADR-0012): an IPv4-only attachment gets no RA or autoconf, and keeps link-local.
+netns "$U"; S5=$NSPID
+check "noSLAAC join" "hook $U create cs5 $S5 '[{\"network\":\"lab4\",\"address\":\"10.254.1.65\",\"mac\":\"02:42:0a:fe:01:65\"}]'"
+check "accept_ra is 0 for noSLAAC" "[[ \$(nsenter -t $S5 --net cat /proc/sys/net/ipv6/conf/lan0/accept_ra) == 0 ]]"
+check "autoconf is 0 for noSLAAC" "[[ \$(nsenter -t $S5 --net cat /proc/sys/net/ipv6/conf/lan0/autoconf) == 0 ]]"
+check "link-local kept for noSLAAC" "in_ns $S5 -6 -o addr show dev lan0 scope link | grep -q 'fe80::'"
+check "v4 default via gateway for noSLAAC" "in_ns $S5 -4 route show default | grep -q 'via 10.254.1.78 dev lan0'"
+check "stop noSLAAC" "hook $U stop cs5 0 '[{\"network\":\"lab4\",\"address\":\"10.254.1.65\",\"mac\":\"02:42:0a:fe:01:65\"}]'"
+
+# 21. RouteKeep (ADR-0005): a join without default keeps the netns's existing v6 default.
+netns "$U"; S6=$NSPID
+in_ns $S6 link add d1 type dummy
+in_ns $S6 link set d1 up
+in_ns $S6 -6 route add default via fd77:255::2 dev d1 metric 100 onlink
+check "join without default with a v6 default present" "hook $U create cs6 $S6 '[{\"network\":\"lab6\",\"address\":\"10.254.1.52\",\"mac\":\"02:42:0a:fe:01:52\",\"address6\":\"fd77:254::66\"}]'"
+check "one v6 default left, still on d1" "[[ \$(in_ns $S6 -6 route show default | wc -l) -eq 1 ]] && in_ns $S6 -6 route show default | grep -q 'dev d1'"
+check "no v6 default via lan0" "! in_ns $S6 -6 route show default | grep -q 'dev lan0'"
+check "stop keeps the v6 default" "hook $U stop cs6 0 '[{\"network\":\"lab6\",\"address\":\"10.254.1.52\",\"mac\":\"02:42:0a:fe:01:52\",\"address6\":\"fd77:254::66\"}]' && in_ns $S6 -6 route show default | grep -q 'dev d1'"
 
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"

@@ -11,7 +11,7 @@ Image=ghcr.io/blackdark/lanatt:latest
 ContainerName=lanatt
 Network=host
 PodmanArgs=--pid=host --security-opt=apparmor=unconfined
-# Needed only with prefix6 networks (sysctl writes): add --security-opt=unmask=/proc/sys
+# Needed only with prefix6 or noSLAAC networks (sysctl writes): add --security-opt=unmask=/proc/sys
 DropCapability=ALL
 AddCapability=NET_ADMIN SYS_ADMIN SYS_PTRACE
 NoNewPrivileges=true

@@ -310,14 +310,17 @@ func routeMetric(route []string) string {
 // prefix6 takes only the static addresses lanatt adds (ADR-0012). The caller's netns may
 // have turned IPv6 off or DAD down: disable_ipv6 would fail the address add, and waitDAD would
 // trust an unprobed address. So those are forced to the values the join needs.
-// Others write nothing: the daemon's /proc/sys is read-only by default, and IPv4 joins must
-// not depend on it.
+// NoSLAAC only stops RA and autoconf; link-local stays. Other networks write nothing: the
+// daemon's /proc/sys is read-only by default, and IPv4 joins must not depend on it.
 func ipv6Sysctls(n config.Network) [][2]string {
 	if n.HasIPv6() {
 		return [][2]string{
 			{"disable_ipv6", "0"}, {"accept_ra", "0"}, {"autoconf", "0"},
 			{"accept_dad", "1"}, {"dad_transmits", "1"},
 		}
+	}
+	if n.NoSLAAC {
+		return [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}
 	}
 	return nil
 }
