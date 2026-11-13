@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.4.0](https://github.com/BlackDark/lanatt/compare/v0.3.0...v0.4.0) (2026-11-13)
+
+
+### Features
+
+* **claims:** record each claim's parent for MAC checks ([#55](https://github.com/BlackDark/lanatt/issues/55)) ([e1382e9](https://github.com/BlackDark/lanatt/commit/e1382e9796dec9f78f876b206b70a1211b2dbb60))
+* **daemon:** keep devices on record until removal is verified ([#56](https://github.com/BlackDark/lanatt/issues/56)) ([dcc0ad0](https://github.com/BlackDark/lanatt/commit/dcc0ad023bece8d4682064bc48ff24856ed5c12d))
+* durable CNI attachment journal with reconciliation ([014388d](https://github.com/BlackDark/lanatt/commit/014388d45fb548cfe6de18500cefdd0dcb8fefd3))
+* ipvlan L2 network driver ([99df498](https://github.com/BlackDark/lanatt/commit/99df49860d6ad90a06f9f569cb3a7d92dd3eac3b)), closes [#21](https://github.com/BlackDark/lanatt/issues/21)
+* lanatt claims lists claims with liveness ([1627ae7](https://github.com/BlackDark/lanatt/commit/1627ae7c4513c1057f1c16c6156584ef6cb18c74))
+* noSLAAC option for IPv4-only networks ([#54](https://github.com/BlackDark/lanatt/issues/54)) ([e334812](https://github.com/BlackDark/lanatt/commit/e3348127ceb3391e5ea6cbc91bd8e084c53dd663))
+* opt-in static ULA IPv6 on networks ([#45](https://github.com/BlackDark/lanatt/issues/45)) ([4c11ce4](https://github.com/BlackDark/lanatt/commit/4c11ce484f87ed05ed0af50e782255a1d4530bb6)), closes [#19](https://github.com/BlackDark/lanatt/issues/19)
+
+
+### Bug Fixes
+
+* claims live only while their owner process holds the netns ([320713b](https://github.com/BlackDark/lanatt/commit/320713b820ff884de03411689db5d7c16d1b59d8))
+* **claims:** refuse a MAC held by another network on the same parent ([#53](https://github.com/BlackDark/lanatt/issues/53)) ([4516f08](https://github.com/BlackDark/lanatt/commit/4516f0834ec612063372f8f5225e32ad1c8be88b))
+* **config:** refuse overlapping IPv4 prefixes on one parent ([#46](https://github.com/BlackDark/lanatt/issues/46)) ([a8428cf](https://github.com/BlackDark/lanatt/commit/a8428cf7fe4b7093e1f5cea202f6c337b2b4e4e4))
+* refusals name the claim holding the address or MAC ([3a21634](https://github.com/BlackDark/lanatt/commit/3a216344f7aa9d54cff12b912c7a54276eff2fda))
+
+
+### Refactoring
+
+* claimlist uses claims.ShortID ([bc509e5](https://github.com/BlackDark/lanatt/commit/bc509e5c543a4b96bc9a58620c139c654de5fa79))
+* **claims:** clarify conflicting join identity ([172a4fc](https://github.com/BlackDark/lanatt/commit/172a4fc3bb23a7922a13e8993efe3b2df5619e55))
+* **claims:** separate planning from persistence ([6a92272](https://github.com/BlackDark/lanatt/commit/6a922729c2ef08f47e3076ab4095c5b7b862436f))
+* **daemon:** keep reservations with their attachment ([#60](https://github.com/BlackDark/lanatt/issues/60)) ([70f9104](https://github.com/BlackDark/lanatt/commit/70f91047edc8ef663882ee310c0d1ef45a82ac71))
+* **daemon:** separate default route handling ([56096d7](https://github.com/BlackDark/lanatt/commit/56096d753083ae8da89ec28966e80a9a5b6062df))
+* use encoding/json/v2 ([#57](https://github.com/BlackDark/lanatt/issues/57)) ([4cc0cc1](https://github.com/BlackDark/lanatt/commit/4cc0cc1ee413464c572d9dc38e91913f6bf314ac))
+
+
+### Documentation
+
+* CNI delegation research and implementation tickets ([e1611e3](https://github.com/BlackDark/lanatt/commit/e1611e3242a083a582b21142b28c099663c5556d))
+* CNI plugin support across engines ([37137d6](https://github.com/BlackDark/lanatt/commit/37137d623a430231e32d65d93f0a66b679964ae6))
+* containerd NRI research for lanatt hooks ([3d52304](https://github.com/BlackDark/lanatt/commit/3d52304c77f813d0ce77e7007c8d074d83b6700d))
+* host shim example so the host reaches its attachments ([f28531c](https://github.com/BlackDark/lanatt/commit/f28531c21c2f1478917f7c2745c71efaf61a92fa))
+* performance notes and Podman networking references ([8a8cd02](https://github.com/BlackDark/lanatt/commit/8a8cd02772a0561ab59f762f7b0bd712a1dbe57f))
+* remove CNI delegation research, keep it in [#25](https://github.com/BlackDark/lanatt/issues/25) ([e1395e3](https://github.com/BlackDark/lanatt/commit/e1395e392cc104fb31175f7dfb152b923c50f1ae))
+* remove research notes, keep findings in issues ([ed739a5](https://github.com/BlackDark/lanatt/commit/ed739a5c937f8bf1e6104e0cd7e4cd379e199e9a))
+
 ## [0.3.0](https://github.com/BlackDark/lanatt/compare/v0.2.0...v0.3.0) (2026-11-02)
 
 
