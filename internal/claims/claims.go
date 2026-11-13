@@ -2,14 +2,10 @@
 package claims
 
 import (
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 
 	"lanatt/internal/config"
 	"lanatt/internal/wire"
@@ -69,6 +65,8 @@ func Plan(s State, nets map[string]config.Network, uid uint32, id string, netns 
 	}
 	seen := map[string]bool{}
 	defaults := 0
+	held := make([]Claim, len(s.Claims), len(s.Claims)+len(joins))
+	copy(held, s.Claims)
 	plans := make([]Planned, 0, len(joins))
 	for _, j := range joins {
 		if seen[j.Network] {
@@ -82,7 +80,7 @@ func Plan(s State, nets map[string]config.Network, uid uint32, id string, netns 
 			return nil, errors.New("more than one join asks for the default route")
 		}
 		// Earlier joins of this request count as claims, so a MAC may not repeat on one parent in one request.
-		p, err := planOne(s.Add(plans), nets, uid, id, netns, j)
+		p, err := planOne(held, nets, uid, id, netns, j)
 		if err != nil {
 			return nil, fmt.Errorf("network %q: %w", j.Network, err)
 		}
@@ -91,6 +89,9 @@ func Plan(s State, nets map[string]config.Network, uid uint32, id string, netns 
 				return nil, fmt.Errorf("network %q: interface %q is already used in this netns", j.Network, p.Interface)
 			}
 			used[p.Interface] = true
+		}
+		if !p.Existing {
+			held = append(held, p.Claim)
 		}
 		plans = append(plans, p)
 	}
@@ -103,7 +104,7 @@ func Plan(s State, nets map[string]config.Network, uid uint32, id string, netns 
 	return plans, nil
 }
 
-func planOne(s State, nets map[string]config.Network, uid uint32, id string, netns uint64, j wire.Join) (Planned, error) {
+func planOne(held []Claim, nets map[string]config.Network, uid uint32, id string, netns uint64, j wire.Join) (Planned, error) {
 	n, ok := nets[j.Network]
 	if !ok {
 		return Planned{}, errors.New("unknown network")
@@ -133,7 +134,7 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 		return Planned{}, fmt.Errorf("interface %q is not a valid name", j.Interface)
 	}
 	want := Claim{ID: id, UID: uid, Netns: netns, Network: n.Name, Parent: n.Parent, Address: addr, Address6: addr6, MAC: mac, Interface: j.Interface}
-	for _, c := range s.Claims {
+	for _, c := range held {
 		if c.Network == n.Name && c.Netns == netns {
 			if c.Address != addr || c.Address6 != addr6 || c.MAC != mac {
 				held := fmt.Sprintf("%s %s", c.Address, c.MAC)
@@ -148,7 +149,7 @@ func planOne(s State, nets map[string]config.Network, uid uint32, id string, net
 			return Planned{Claim: c, Default: j.Default, Existing: true}, nil
 		}
 	}
-	for _, c := range s.Claims {
+	for _, c := range held {
 		if c.Network == n.Name && c.Address == addr {
 			return Planned{}, fmt.Errorf("address %s is taken by %s", addr, Holder(c))
 		}
@@ -301,47 +302,4 @@ func ShortID(id string) string {
 		return id[:12]
 	}
 	return id
-}
-
-// Load reads the state file. A missing file is an empty state.
-func Load(path string) (State, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return State{Claims: []Claim{}}, nil
-	}
-	if err != nil {
-		return State{}, err
-	}
-	var s State
-	if err := json.Unmarshal(data, &s); err != nil {
-		return State{}, fmt.Errorf("state %s: %w", path, err)
-	}
-	return s, nil
-}
-
-// Save writes the state file atomically.
-func Save(path string, s State) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	data, err := json.Marshal(s, jsontext.WithIndent("  "))
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

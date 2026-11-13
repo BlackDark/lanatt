@@ -554,3 +554,21 @@ func TestClaimRecordsParentInJSON(t *testing.T) {
 		t.Errorf("parent not saved: %s", data)
 	}
 }
+
+func TestPlanLeavesClaimBackingArrayIntact(t *testing.T) {
+	held := admit(t, State{}, "existing", 1, j1).Claims[0]
+	spare := Claim{ID: "spare slot"}
+	backing := []Claim{held, spare}
+	s := State{Claims: backing[:1], Pending: []Pending{pendingRec(3, "a", "pending")}}
+	joins := []wire.Join{
+		{Network: "a", Address: "10.254.1.3", MAC: "02:00:00:00:00:03"},
+		{Network: "b", Address: "10.254.2.4", MAC: "02:00:00:00:00:04"},
+	}
+	plans, err := Plan(s, nets(t), 1000, "new", 2, joins)
+	if err != nil || len(plans) != len(joins) {
+		t.Fatalf("plan returned %v, %v", plans, err)
+	}
+	if backing[0] != held || backing[1] != spare || s.Pending[0] != pendingRec(3, "a", "pending") {
+		t.Fatalf("planning changed caller state: %v, %v", backing, s.Pending)
+	}
+}
