@@ -222,3 +222,29 @@ func TestParseRefusesCaseMismatchAndTrailingData(t *testing.T) {
 		t.Error("trailing data accepted")
 	}
 }
+
+func TestParseAllowSLAAC(t *testing.T) {
+	const base = `"name":"lan","parent":"dummy0","prefix":"10.254.1.0/28","gateway":"10.254.1.14","driver":"macvlan"`
+	for _, tt := range []struct {
+		name, fields, wantError string
+		enabled                 bool
+	}{
+		{"opt in", `,"prefix6":"fd00:1::/64","allowSLAAC":true`, "", true},
+		{"omitted", `,"prefix6":"fd00:1::/64"`, "", false},
+		{"without prefix", `,"allowSLAAC":true`, "allowSLAAC needs prefix6", false},
+		{"with noSLAAC", `,"prefix6":"fd00:1::/64","allowSLAAC":true,"noSLAAC":true`, "noSLAAC", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Parse([]byte(cfgWith("{" + base + tt.fields + "}")))
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("got %v, want %q", err, tt.wantError)
+				}
+				return
+			}
+			if err != nil || cfg.Networks["lan"].AllowSLAAC != tt.enabled {
+				t.Fatalf("got allowSLAAC=%v, %v", cfg.Networks["lan"].AllowSLAAC, err)
+			}
+		})
+	}
+}

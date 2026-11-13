@@ -30,8 +30,9 @@ lanatt daemon -config /etc/lanatt/config.json
 - `ranges` (optional) limits which addresses callers may claim: `"a-b"` (inclusive) or CIDR entries. Each must hold only host addresses of `prefix`, exclude the gateway, and not overlap another. Without it, any host address in `prefix` except the gateway is allowed.
 - `gateway` must be a host address in `prefix`. lanatt does not create the host shim.
 - `noSLAAC` (optional, default `false`) on an IPv4-only network stops the attachment from taking SLAAC addresses and routes from the LAN. The daemon sets `accept_ra=0` and `autoconf=0` before the link comes up; link-local stays. Needs a writable `/proc/sys` in a container, as `prefix6` does. Refused with `prefix6`. See ADR-0012.
-- `prefix6` (optional) turns on IPv6 for the network. It must be a `/48` to `/64` inside `fd00::/8` (ULA). A global prefix needs `allowGlobal6: true`. Two networks on one `parent` cannot have overlapping `prefix6`. `gateway6` (optional) must be a host address in `prefix6`. Without `prefix6`, `gateway6` and `allowGlobal6` are refused. See ADR-0012.
-- Attachments on a network with `prefix6` get the static `address6` lanatt adds, and no RA-derived addresses or routes. A join that omits `address6` gets no static address. Each still has an automatic IPv6 link-local address (`fe80::`), which lanatt does not manage. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them, unless the network sets `noSLAAC`.
+- `prefix6` (optional) turns on IPv6 for the network. It must be a `/48` to `/64` inside `fd00::/8` (ULA). A global prefix needs `allowGlobal6: true`. Two networks on one `parent` cannot have overlapping `prefix6`. `gateway6` (optional) must be a host address in `prefix6`. Without `prefix6`, `gateway6`, `allowGlobal6: true` and `allowSLAAC: true` are refused. See ADR-0012.
+- `allowSLAAC: true` (optional) lets a `prefix6` attachment accept router advertisements (RA) and use SLAAC alongside its static `address6`. Enable it on a LAN whose router you trust to supply global prefixes and routing. Router advertisements arrive asynchronously. Choose a static `address6` distinct from any address the interface generates from an advertised prefix. IPvlan siblings share a MAC, so they need distinct interface identifiers to use SLAAC on the same LAN.
+- By default, attachments on a network with `prefix6` use static `address6` with RA disabled. A join that omits `address6` gets no static address. Each still has an automatic IPv6 link-local address (`fe80::`), which lanatt does not manage. Attachments on IPv4-only networks are not touched, so SLAAC from a dual-stack LAN still reaches them, unless the network sets `noSLAAC`.
 - On start, and before each attach, a claim is dropped unless its owner still holds it: the same boot, the owner pid still alive with the same start time, and the owner still in the claim's netns. Claims saved before owners were recorded are dropped on the first start. Each dropped claim is logged with its short id, address and reason.
 - Each device is marked with the alias `lanatt:<token>`. A device whose removal could not be verified keeps a `pending` record in the state file until a later start, stop, or attach that conflicts with it removes it. A record from an earlier boot is retired without a removal attempt. A record is never dropped on owner exit alone. See ADR-0007.
 - The caller must be the real host UID of the target pid. Stop drops only the caller's own claims for that container id.
@@ -56,9 +57,9 @@ The hook reads the OCI state on stdin and the annotation `io.lanatt.attachments`
 
 - `interface` defaults to `lan0`, `lan1`, … in list order.
 - `address6` (optional, needs `prefix6`) adds a static IPv6 address in `prefix6`. Clash rules are the same as for `address`. A hook that sends `address6` needs a daemon from the release that added it: an older daemon refuses the unknown field.
-- `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. The replaced route keeps its metric. A v6 replace needs `gateway6` and `address6`. If the join fails after a default changed, the previous default is put back best effort, and a failed restore is logged. Without it, a default route is added only when the netns has none, per family. A v6 default is added only with `gateway6` and `address6`.
+- `default: true` replaces the netns default route with one via the network gateway, in each family the attachment serves. The replaced route keeps its metric. A v6 replace needs `gateway6` and `address6`. If the join fails after a default changed, the daemon attempts to restore the previous default and reports any restore error. Without it, a default route is added only when the netns has none, per family. In static-only mode a v6 default needs `gateway6` and `address6`. With `allowSLAAC: true`, the attachment learns its IPv6 default from RA even when `gateway6` is configured. An explicit `default: true` with both `gateway6` and `address6` installs the configured IPv6 default and disables RA default learning on that attachment while keeping SLAAC.
 - A duplicate IPv6 address on the LAN is detected by DAD. The join is refused and its device is removed.
-- IPv6 limits: ULA addresses reach the LAN only; there is no internet or DNS over IPv6 from the attachment (no RA, no DHCPv6). The RA-learned MTU does not apply; the link keeps its parent MTU.
+- IPv6 limits: static-only ULA attachments have LAN reachability and keep the parent MTU. With `allowSLAAC`, global connectivity depends on LAN router advertisements and upstream routing. lanatt does not configure a DNS resolver or run a DHCPv6 client.
 - A failed attach rolls back its new joins. Each device whose removal cannot be verified keeps a `pending` record. The daemon retries on startup, matching stop, or a conflicting attach. A conflicting attach is refused while cleanup is pending.
 - If the daemon cannot save state after verifying removal, it refuses further attaches until a save succeeds.
 - The same join again is success. A different address, address6 or MAC for the same network and netns is refused. So is an address or address6 another netns holds on that network, and a MAC another attachment holds on the parent that attachment was made on, even if its network has been edited or removed since. A claim saved before parents were recorded has no known parent, so it blocks its MAC on every parent.
@@ -135,9 +136,9 @@ An attachment is a kernel macvlan or ipvlan, so its traffic takes the kernel's n
 The Podman-side ordering comes from the references below. lanatt's own throughput has not been benchmarked.
 
 - **Fastest:** run the workload with `--network none`, so the attachment is its only network and every packet, inbound and outbound, stays in the kernel. The examples do this.
-- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the IPv4 default route stays on the engine network unless the join sets `"default": true`. An IPv6 default is added only when the join has `address6`, the network has `gateway6`, and the netns has no IPv6 default. With `"default": true`, an existing IPv6 default is replaced instead. Without that flag, internet-bound traffic goes through `pasta`; LAN traffic for the prefix still uses the attachment.
+- **Keeping an engine network** (`pasta` or a custom network) next to the attachment: the IPv4 default route stays on the engine network unless the join sets `"default": true`. In static-only mode, an IPv6 default is added when the join has `address6`, the network has `gateway6`, and the netns has no IPv6 default. With `"default": true`, the configured gateway replaces the existing default. With `allowSLAAC: true`, an RA-learned IPv6 default can coexist with the engine route. Route selection follows the kernel’s routing rules unless the join requests a configured override.
 - Port publishing (`-p`, `PublishPort=`) does not apply to the attachment: services listen on the attachment's address directly.
-- The MTU is the parent NIC's.
+- The link inherits the parent NIC's MTU. With RA enabled, the router can advertise a different IPv6 MTU.
 
 ## References
 
@@ -149,11 +150,11 @@ Rootless Podman networking, for workloads that combine lanatt with Podman's own 
 
 ## Acceptance
 
-`test/accept.sh` drives the daemon through the hook against a dummy parent and `10.254.1.0/28`. Root on a test VM only (`VM=<host>`):
+`test/accept.sh` drives the daemon through the hook against a dummy parent and `10.254.1.0/28`. Run as root on a test VM with Python 3 for the isolated RA fixture (`VM=<host>`).
 
 ```sh
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/lanatt ./cmd/lanatt
-scp /tmp/lanatt test/accept.sh root@$VM:/tmp/
+scp /tmp/lanatt test/accept.sh test/send-ra.py root@$VM:/tmp/
 ssh root@$VM bash /tmp/accept.sh /tmp/lanatt
 ```
 

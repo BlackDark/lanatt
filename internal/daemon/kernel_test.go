@@ -41,16 +41,16 @@ func TestLinkAddArgsPerDriver(t *testing.T) {
 
 func TestIPv6SysctlsPerNetwork(t *testing.T) {
 	v4 := config.Network{}
-	if got := ipv6Sysctls(v4); len(got) != 0 {
+	if got := ipv6Sysctls(v4, claims.Planned{}); len(got) != 0 {
 		t.Errorf("IPv4-only: %v", got)
 	}
 	dual := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64")}
 	want := [][2]string{{"disable_ipv6", "0"}, {"accept_ra", "0"}, {"autoconf", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"}}
-	if got := ipv6Sysctls(dual); !slices.Equal(got, want) {
+	if got := ipv6Sysctls(dual, claims.Planned{}); !slices.Equal(got, want) {
 		t.Errorf("dual-stack: %v", got)
 	}
 	noSLAAC := config.Network{NoSLAAC: true}
-	if got := ipv6Sysctls(noSLAAC); !slices.Equal(got, [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}) {
+	if got := ipv6Sysctls(noSLAAC, claims.Planned{}); !slices.Equal(got, [][2]string{{"accept_ra", "0"}, {"autoconf", "0"}}) {
 		t.Errorf("noSLAAC: %v", got)
 	}
 }
@@ -68,5 +68,55 @@ func TestDADState(t *testing.T) {
 		if got := dadState(c.out, addr); got != c.want {
 			t.Errorf("%s: got %q want %q", name, got, c.want)
 		}
+	}
+}
+
+func TestSLAACDefaultPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name                     string
+		slaac, replace, gw, addr bool
+		wantStatic               bool
+	}{
+		{"static route fallback", false, false, true, true, true},
+		{"RA with configured gateway", true, false, true, true, false},
+		{"explicit override", true, true, true, true, true},
+		{"no gateway", true, true, false, true, false},
+		{"no static address", true, true, true, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			n := config.Network{Prefix6: netip.MustParsePrefix("fd00:1::/64"), AllowSLAAC: tt.slaac}
+			p := claims.Planned{Default: tt.replace}
+			if tt.gw {
+				n.Gateway6 = netip.MustParseAddr("fd00:1::1")
+			}
+			if tt.addr {
+				p.Address6 = netip.MustParseAddr("fd00:1::2")
+			}
+			if got := useStaticDefault6(n, p); got != tt.wantStatic {
+				t.Errorf("static default = %v, want %v", got, tt.wantStatic)
+			}
+			if !tt.slaac {
+				return
+			}
+			settings := make(map[string]string)
+			for _, kv := range ipv6Sysctls(n, p) {
+				settings[kv[0]] = kv[1]
+			}
+			for key, want := range map[string]string{
+				"disable_ipv6": "0", "accept_ra": "2", "accept_ra_pinfo": "1",
+				"autoconf": "1", "accept_dad": "1", "dad_transmits": "1",
+			} {
+				if got := settings[key]; got != want {
+					t.Errorf("%s = %q, want %q", key, got, want)
+				}
+			}
+			wantRouter := "1"
+			if tt.wantStatic {
+				wantRouter = "0"
+			}
+			if settings["accept_ra_defrtr"] != wantRouter {
+				t.Errorf("unexpected RA default policy: %v", settings)
+			}
+		})
 	}
 }
