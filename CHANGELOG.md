@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/BlackDark/lanatt/compare/v0.4.0...v0.5.0) (2026-11-13)
+
+
+### Features
+
+* **daemon:** allow SLAAC alongside static IPv6 ([3512d72](https://github.com/BlackDark/lanatt/commit/3512d72fa4436c05e8f8e6713a32e478774fd51d))
+
 ## [0.4.0](https://github.com/BlackDark/lanatt/compare/v0.3.0...v0.4.0) (2026-11-13)
 
 
