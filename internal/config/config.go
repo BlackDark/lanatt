@@ -33,6 +33,8 @@ type Network struct {
 	Gateway6 netip.Addr
 	// NoSLAAC stops SLAAC from the LAN on an IPv4-only network's attachments. See ADR-0012.
 	NoSLAAC bool
+	// AllowSLAAC accepts LAN router advertisements alongside static IPv6.
+	AllowSLAAC bool
 }
 
 // Config is the validated daemon config.
@@ -57,6 +59,7 @@ type rawNetwork struct {
 	Gateway6     string `json:"gateway6"`
 	AllowGlobal6 bool   `json:"allowGlobal6"`
 	NoSLAAC      bool   `json:"noSLAAC"`
+	AllowSLAAC   bool   `json:"allowSLAAC"`
 }
 
 type rawConfig struct {
@@ -203,9 +206,12 @@ func parseNetwork(rn rawNetwork) (Network, error) {
 }
 
 // parseIPv6 reads the optional IPv6 part of a network. Without prefix6 the network has no
-// IPv6, so gateway6 and allowGlobal6 would do nothing and are refused.
+// static IPv6, so options that depend on it are refused.
 func parseIPv6(n *Network, rn rawNetwork) error {
 	if rn.Prefix6 == "" {
+		if rn.AllowSLAAC {
+			return errors.New("allowSLAAC needs prefix6")
+		}
 		if rn.Gateway6 != "" || rn.AllowGlobal6 {
 			return errors.New("gateway6 and allowGlobal6 need prefix6")
 		}
@@ -232,10 +238,10 @@ func parseIPv6(n *Network, rn rawNetwork) error {
 		return fmt.Errorf("prefix6 %s is not ULA (fd00::/8); set allowGlobal6 for a global prefix", p)
 	}
 	if rn.NoSLAAC {
-		// prefix6 networks already take no SLAAC; the option would do nothing.
-		return errors.New("noSLAAC is for IPv4-only networks; prefix6 already takes no SLAAC")
+		return errors.New("noSLAAC is for IPv4-only networks and cannot be used with prefix6")
 	}
 	n.Prefix6 = p
+	n.AllowSLAAC = rn.AllowSLAAC
 	if rn.Gateway6 == "" {
 		return nil
 	}

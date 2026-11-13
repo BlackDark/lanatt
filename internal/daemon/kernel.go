@@ -54,8 +54,8 @@ func configure(ns *os.File, n config.Network, p claims.Planned, tmp string) (und
 	if _, err := inNetns(ns, "link", "set", "dev", tmp, "name", p.Interface); err != nil {
 		return defaultUndo{}, err
 	}
-	// Set before the link is up, so no RA is ever processed.
-	for _, kv := range ipv6Sysctls(n) {
+	// Set the IPv6 policy before the link can receive router advertisements.
+	for _, kv := range ipv6Sysctls(n, p) {
 		if err := setIPv6(ns, p.Interface, kv[0], kv[1]); err != nil {
 			return defaultUndo{}, err
 		}
@@ -95,9 +95,7 @@ func configure(ns *os.File, n config.Network, p claims.Planned, tmp string) (und
 	if wrote {
 		undo.written["-4"] = replaced
 	}
-	// A v6 default needs both a gateway6 and this attachment's own address6; otherwise the
-	// attachment is connected-route only in IPv6.
-	if n.Gateway6.IsValid() && p.Address6.IsValid() {
+	if useStaticDefault6(n, p) {
 		replaced, wrote, err = setDefault(ns, "-6", n.Gateway6, p.Interface, p.Default)
 		if wrote {
 			undo.written["-6"] = replaced
@@ -106,17 +104,29 @@ func configure(ns *os.File, n config.Network, p claims.Planned, tmp string) (und
 	return undo, err
 }
 
-// ipv6Sysctls are the net.ipv6.conf.<iface> settings for a new attachment. A network with
-// prefix6 takes only the static addresses lanatt adds (ADR-0012). The caller's netns may
-// have turned IPv6 off or DAD down: disable_ipv6 would fail the address add, and waitDAD would
-// trust an unprobed address. So those are forced to the values the join needs.
-// NoSLAAC only stops RA and autoconf; link-local stays. Other networks write nothing: the
-// daemon's /proc/sys is read-only by default, and IPv4 joins must not depend on it.
-func ipv6Sysctls(n config.Network) [][2]string {
+// useStaticDefault6 leaves route discovery to RA on SLAAC networks unless the
+// join explicitly selects a configured IPv6 gateway.
+func useStaticDefault6(n config.Network, p claims.Planned) bool {
+	return n.Gateway6.IsValid() && p.Address6.IsValid() && (!n.AllowSLAAC || p.Default)
+}
+
+// ipv6Sysctls enables IPv6 and DAD for static addressing even when the workload
+// disabled them. Plain networks leave their inherited settings alone.
+func ipv6Sysctls(n config.Network, p claims.Planned) [][2]string {
 	if n.HasIPv6() {
+		if !n.AllowSLAAC {
+			return [][2]string{{"disable_ipv6", "0"}, {"accept_ra", "0"}, {"autoconf", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"}}
+		}
+		// Accept RA even in a forwarding netns. Keep autonomous prefix learning
+		// on when a configured gateway takes the place of the advertised default.
+		defaultRouter := "1"
+		if useStaticDefault6(n, p) {
+			defaultRouter = "0"
+		}
 		return [][2]string{
-			{"disable_ipv6", "0"}, {"accept_ra", "0"}, {"autoconf", "0"},
-			{"accept_dad", "1"}, {"dad_transmits", "1"},
+			{"disable_ipv6", "0"}, {"accept_dad", "1"}, {"dad_transmits", "1"},
+			{"accept_ra", "2"}, {"accept_ra_pinfo", "1"}, {"autoconf", "1"},
+			{"accept_ra_defrtr", defaultRouter},
 		}
 	}
 	if n.NoSLAAC {

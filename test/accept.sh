@@ -3,6 +3,7 @@
 # Usage: accept.sh /path/to/lanatt
 set -u
 BIN=${1:?usage: accept.sh /path/to/lanatt}
+TEST_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 WORK=/tmp/lanatt-accept
 SOCK=$WORK/lanatt.sock
 STATE=$WORK/claims.json
@@ -48,6 +49,7 @@ cat >"$CFG" <<EOF
   {"name":"lab2","parent":"$PARENT","prefix":"10.254.1.16/28","gateway":"10.254.1.30","driver":"macvlan","ranges":["10.254.1.17-10.254.1.20"]},
   {"name":"lab6","parent":"$PARENT","prefix":"10.254.1.48/28","gateway":"10.254.1.62","driver":"macvlan","prefix6":"fd77:254::/64","gateway6":"fd77:254::1"},
   {"name":"lab4","parent":"$PARENT","prefix":"10.254.1.64/28","gateway":"10.254.1.78","driver":"macvlan","noSLAAC":true},
+  {"name":"slaac","parent":"$PARENT","prefix":"10.254.1.80/28","gateway":"10.254.1.94","driver":"macvlan","prefix6":"fd77:255:62::/64","gateway6":"fd77:255:62::1","allowSLAAC":true},
   {"name":"vl","parent":"$PARENT2","prefix":"10.254.1.32/28","gateway":"10.254.1.46","driver":"ipvlan"}]}
 EOF
 
@@ -285,6 +287,40 @@ check "join without default with a v6 default present" "hook $U create cs6 $S6 '
 check "one v6 default left, still on d1" "[[ \$(in_ns $S6 -6 route show default | wc -l) -eq 1 ]] && in_ns $S6 -6 route show default | grep -q 'dev d1'"
 check "no v6 default via lan0" "! in_ns $S6 -6 route show default | grep -q 'dev lan0'"
 check "stop keeps the v6 default" "hook $U stop cs6 0 '[{\"network\":\"lab6\",\"address\":\"10.254.1.52\",\"mac\":\"02:42:0a:fe:01:52\",\"address6\":\"fd77:254::66\"}]' && in_ns $S6 -6 route show default | grep -q 'dev d1'"
+
+# 22. An isolated router advertises a prefix and default to opted-in macvlans.
+slaac_advertise() {
+  python3 "$TEST_DIR/send-ra.py" latrouter
+}
+wait_for_slaac() {
+  local pid=$1
+  for _ in {1..10}; do
+    slaac_advertise || return
+    if in_ns "$pid" -6 -o addr show dev lan0 -tentative -dadfailed | grep -q '2001:db8:62:'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+ip link add link "$PARENT" name latrouter type macvlan mode bridge
+ip link set latrouter up
+ip -6 addr add fd77:255:62::1/64 dev latrouter nodad
+ip -6 addr add fd77:255:62::84/64 dev latrouter nodad
+
+netns "$U"; S7=$NSPID
+check "SLAAC join with gateway6 configured" "hook $U create slaac $S7 '[{\"network\":\"slaac\",\"address\":\"10.254.1.82\",\"mac\":\"02:42:0a:fe:01:82\",\"address6\":\"fd77:255:62::82\"}]'"
+check "SLAAC join has a preferred advertised address" "wait_for_slaac $S7"
+check "SLAAC join keeps its static ULA" "in_ns $S7 -6 -o addr show dev lan0 -tentative -dadfailed | grep -q 'fd77:255:62::82/64'"
+check "RA supplies the IPv6 default" "in_ns $S7 -6 route show default | grep -q 'dev lan0 proto ra'"
+
+netns "$U"; S8=$NSPID
+check "SLAAC join can select gateway6 explicitly" "hook $U create slaac-default $S8 '[{\"network\":\"slaac\",\"address\":\"10.254.1.83\",\"mac\":\"02:42:0a:fe:01:83\",\"address6\":\"fd77:255:62::83\",\"default\":true}]'"
+check "explicit IPv6 default still permits SLAAC" "wait_for_slaac $S8"
+check "later RA leaves only the configured default" "slaac_advertise && sleep 1 && in_ns $S8 -6 route show default | grep -q 'via fd77:255:62::1 dev lan0' && ! in_ns $S8 -6 route show default | grep -q 'proto ra'"
+netns "$U"; S9=$NSPID
+check "SLAAC join still refuses a duplicate static address" "! hook $U create slaac-duplicate $S9 '[{\"network\":\"slaac\",\"address\":\"10.254.1.84\",\"mac\":\"02:42:0a:fe:01:84\",\"address6\":\"fd77:255:62::84\"}]'"
+check "duplicate static address refusal is from DAD" "grep -q 'address6 fd77:255:62::84 is already in use' '$WORK/hook.err'"
 
 echo
 echo "hook errors seen:"; sed 's/^/  /' "$WORK/hook.err"
