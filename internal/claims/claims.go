@@ -137,11 +137,11 @@ func planOne(held []Claim, nets map[string]config.Network, uid uint32, id string
 	for _, c := range held {
 		if c.Network == n.Name && c.Netns == netns {
 			if c.Address != addr || c.Address6 != addr6 || c.MAC != mac {
-				held := fmt.Sprintf("%s %s", c.Address, c.MAC)
+				identity := fmt.Sprintf("%s %s", c.Address, c.MAC)
 				if c.Address6.IsValid() {
-					held += " " + c.Address6.String()
+					identity += " " + c.Address6.String()
 				}
-				return Planned{}, fmt.Errorf("netns already joined with %s", held)
+				return Planned{}, fmt.Errorf("netns already joined with %s", identity)
 			}
 			if j.Interface != "" && j.Interface != c.Interface {
 				return Planned{}, fmt.Errorf("netns already joined as interface %q", c.Interface)
