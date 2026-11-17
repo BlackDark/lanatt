@@ -1,17 +1,6 @@
 // Shared defaults live in BlackDark/renovate-base. Keep repo-specific rules here.
 // Repo settings: enable "Allow auto-merge" and require the CI `check` on main.
 {
-  customManagers: [
-    {
-      customType: "regex",
-      managerFilePatterns: ["/\\.github/workflows/.*\\.ya?ml$/"],
-      matchStrings: [
-        '# actionlint-local-archive\\s+ACTIONLINT_VERSION: "(?<currentValue>[^"]+)"\\s+ACTIONLINT_SHA256: "(?<currentDigest>[a-f0-9]{64})"',
-      ],
-      depNameTemplate: "rhysd/actionlint",
-      datasourceTemplate: "github-release-attachments",
-    },
-  ],
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: [
     "github>blackdark/renovate-base//default.json5",
