@@ -1,9 +1,5 @@
-# CI header for every repo (from BlackDark/agent-presets).
-# - Draft PRs don't build: push freely, "Ready for review" starts one run.
-# - A new push to a PR cancels its outdated run; runs on main and tags finish.
-# - workflow_call lets release.yml reuse the same checks.
-# - Every job carries the draft `if:`; jobs with `needs:` inherit the skip. A skipped job counts as passed for required checks.
-# - Rulesets require the job `check`: a gate over `go` and `image`.
+# Path-aware code, image, and lint areas with one required `check` gate.
+# Draft PRs skip; main, releases, and manual runs execute every area.
 name: CI
 
 on:
@@ -18,12 +14,53 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # renovate: datasource=github-releases depName=rhysd/actionlint
+  ACTIONLINT_VERSION: "1.7.12"
+  # renovate: datasource=npm depName=renovate
+  RENOVATE_VERSION: "44.221.1"
+
 jobs:
-  go:
+  changes:
     if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.areas.outputs.go }}
+      image: ${{ steps.areas.outputs.image }}
+      lint: ${{ steps.areas.outputs.lint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: areas
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            { echo "go=true"; echo "image=true"; echo "lint=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          has() { grep -qE "$1" <<< "$changed" && echo true || echo false; }
+          ci=$(has '^\.github/workflows/ci\.yml$')
+          go=$(has '^(cmd/|internal/|go\.(mod|sum)$|mise\.toml$)')
+          image=$(has '^(Dockerfile$|cmd/|internal/|go\.(mod|sum)$)')
+          if [ "$ci" = true ]; then
+            go=true
+            image=true
+          fi
+          {
+            echo "go=$go"
+            echo "image=$image"
+            echo "lint=$(has '^(\.github/|renovate\.json5?$)')"
+          } >> "$GITHUB_OUTPUT"
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -35,7 +72,8 @@ jobs:
 
   # Both targets on one runner: Go cross-compiles natively; only the final apt-get runs under QEMU.
   image:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -50,7 +88,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.workflow == 'CI' && github.ref == 'refs/heads/main' && github.event_name == 'push' && 'type=gha,mode=max' || '' }}
       - name: Load amd64
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -64,9 +102,48 @@ jobs:
           out=$(docker run --rm lanatt:ci hook 2>&1 || true)
           grep -q "usage: lanatt hook" <<<"$out"
 
+  actionlint:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION"
+          ./actionlint -color .github/workflows/*.yml
+
+  renovate-config:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: npx --yes --package "renovate@${RENOVATE_VERSION}" -- renovate-config-validator --strict
+
+  zizmor:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          inputs: .github/workflows
+          advanced-security: false
+          annotations: true
+
   check:
     if: always()
-    needs: [go, image]
+    needs: [changes, go, image, actionlint, renovate-config, zizmor]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
